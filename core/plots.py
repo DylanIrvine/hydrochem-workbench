@@ -1,0 +1,648 @@
+# core/plots.py
+# All figures. The house style comes from PiperScript.py: 8 pt sans-serif,
+# black-edged markers, ticks straddling the axis, sizes in centimetres.
+#
+#   piper()            the coloured trilinear Piper from PiperScript.py
+#   schoeller()        native, house style
+#   stiff()            native, house style, a grid of samples
+#   wqchartpy_figure() Durov, Gibbs, Chadha and HFE-D straight from WQChartPy
+#                      (not yet restyled)
+#   gallery_page()     a page of diagnostic x-y panels with reference lines
+#   custom()           any variable against any other
+#
+# Figures are built with Figure() rather than plt.figure(), as in HydroSTITCH:
+# pyplot holds a reference to every figure it makes, and Streamlit redraws on
+# every click. The WQChartPy wrapper is the one exception, because WQChartPy
+# calls pyplot itself; it closes what it opens.
+
+# %%
+import os
+import tempfile
+
+import numpy as np
+import pandas as pd
+import matplotlib
+import matplotlib.colors as mcolors
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+
+from core.chem import SEAWATER_MMOL, hollow_mask
+
+CM = 1.0 / 2.54
+
+# %% style
+# Arial where it exists (Windows, Mac), otherwise the metric-compatible
+# Liberation Sans, otherwise matplotlib's default.
+STYLE = {
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Arial', 'Liberation Sans', 'DejaVu Sans'],
+    'font.size': 8,
+    'axes.labelsize': 8,
+    'axes.titlesize': 8,
+    'xtick.labelsize': 8,
+    'ytick.labelsize': 8,
+    'legend.fontsize': 8,
+    'axes.linewidth': 0.6,
+    'xtick.direction': 'inout',
+    'ytick.direction': 'inout',
+    'xtick.major.width': 0.5,
+    'ytick.major.width': 0.5,
+    'mathtext.default': 'regular',
+}
+
+# Group colours and markers, assigned in order of first appearance of Label.
+PALETTE = ['#0089d0', '#F37021', '#CC004C', '#7ea070', '#665e8e', '#FCB711',
+           '#00bdd0', '#a88958', '#0055d0', '#7a7c78']
+MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X', '<', '>', 'h']
+
+# Piper field colours, from PiperScript.py
+PIPER = {'Ca': '#FCB711', 'NaK': '#F37021', 'Mg': '#CC004C',
+         'HCO3': '#00bdd0', 'Cl': '#0089d0', 'SO4': '#0055d0',
+         'Ca-Cl': '#7ea070', 'Na-HCO3': '#a88958', 'Mg-HCO3': '#665e8e',
+         'Na-Cl': '#7a7c78', 'Mixed': '0.9'}
+
+# Pretty axis labels: subscripts and charges for the common species.
+_PRETTY = [('HCO3', 'HCO$_3$'), ('SO4', 'SO$_4$'), ('NO3', 'NO$_3$'),
+           ('CO3', 'CO$_3$'), ('SiO2', 'SiO$_2$'), ('pCO2', 'pCO$_2$')]
+
+
+def pretty(name):
+    out = name
+    for raw, nice in _PRETTY:
+        out = out.replace(raw, nice)
+    return out
+
+
+def group_styles(v):
+    """Label -> (colour, marker). A row's own Color/Marker wins if given."""
+    styles = {}
+    for k, lab in enumerate(pd.unique(v['Label'])):
+        rows = v[v['Label'] == lab]
+        col = next((c for c in rows['Color'] if c and mcolors.is_color_like(c)), None)
+        mk = next((m for m in rows['Marker'] if m), None)
+        styles[lab] = (col or PALETTE[k % len(PALETTE)], mk or MARKERS[k % len(MARKERS)])
+    return styles
+
+
+def _scatter(ax, v, x, y, hollow, styles, cvals=None, size=22, legend=True, zorder=10):
+    """Scatter by group. Hollow markers where `hollow` is True.
+
+    With `cvals` (a numeric Series) the fill colour comes from a viridis scale
+    and the marker shape alone carries the group. Returns the mappable or None.
+    """
+    mappable = None
+    if cvals is not None:
+        ok = cvals.notna()
+        norm = mcolors.Normalize(vmin=cvals[ok].min(), vmax=cvals[ok].max()) if ok.any() else None
+    for lab, (col, mk) in styles.items():
+        g = (v['Label'] == lab) & x.notna() & y.notna()
+        solid = g & ~hollow
+        open_ = g & hollow
+        if cvals is not None and norm is not None:
+            sel = solid & cvals.notna()
+            if sel.any():
+                mappable = ax.scatter(x[sel], y[sel], c=cvals[sel], cmap='viridis', norm=norm,
+                                      marker=mk, s=size, edgecolors='black', linewidths=0.5,
+                                      zorder=zorder, label=lab if legend else None)
+            sel = open_ | (solid & cvals.isna())
+            if sel.any():
+                ax.scatter(x[sel], y[sel], marker=mk, s=size, facecolors='none',
+                           edgecolors='0.3', linewidths=0.9, zorder=zorder)
+        else:
+            if solid.any():
+                ax.scatter(x[solid], y[solid], marker=mk, s=size, color=col, alpha=0.85,
+                           edgecolors='black', linewidths=0.5, zorder=zorder,
+                           label=lab if legend else None)
+            if open_.any():
+                ax.scatter(x[open_], y[open_], marker=mk, s=size, facecolors='none',
+                           edgecolors=col, linewidths=1.0, zorder=zorder,
+                           label=lab if (legend and not solid.any()) else None)
+    return mappable
+
+
+def _legend_handles(styles, any_hollow):
+    handles = [Line2D([], [], ls='', marker=mk, mfc=col, mec='black', mew=0.5, ms=5, label=lab)
+               for lab, (col, mk) in styles.items()]
+    if any_hollow:
+        handles.append(Line2D([], [], ls='', marker='o', mfc='none', mec='0.3', mew=1.0, ms=5,
+                              label='Filled input (hollow)'))
+    return handles
+
+
+# %% Piper
+def piper(v, color_by=None, water_legend=False, show_types=True):
+    """Coloured trilinear Piper diagram. Geometry and colours from PiperScript.py,
+    which was adapted from WQChartPy's triangle_piper (Yang et al., 2022).
+
+    Changes from the script: returns a Figure instead of saving; points are
+    drawn by group; samples with a filled HCO3 are hollow; the meq/L branch no
+    longer references an undefined array.
+    """
+    with matplotlib.rc_context(STYLE):
+        offset = 0.10
+        h = 0.5 * np.tan(np.pi / 3.0)
+        t3 = np.tan(np.pi / 3)
+        a = 0.5                                     # field transparency
+
+        fig = Figure(figsize=(16 * CM, 16 * CM), dpi=150)
+        ax = fig.add_subplot(111, aspect='equal', frameon=False, xticks=[], yticks=[])
+
+        # outlines
+        ltx = np.array([0, 0.5, 1, 0])
+        lty = np.array([0, h, 0, 0])
+        ax.plot(ltx, lty, '-k', lw=1.0)
+        ax.plot(ltx + 2 * offset + 1, lty, '-k', lw=1.0)
+        ax.plot(np.array([0.5, 1, 1.5, 1, 0.5]) + offset,
+                h * np.array([1, 2, 1, 0, 1]) + offset * t3, '-k', lw=1.0)
+
+        # grid at 20 % and tick labels
+        ticklabels = ['0', '20', '40', '60', '80', '100']
+        R = 1 + 2 * offset                           # x shift of the right triangle
+        for i, x in enumerate(np.linspace(0, 1, 6)):
+            inner = i in [1, 2, 3, 4]
+            for sx, lab_bottom, lab_right, lab_left in [
+                    (0, ticklabels[-i - 1], ticklabels[i], ticklabels[i]),
+                    (R, ticklabels[i], ticklabels[-i - 1], ticklabels[-i - 1])]:
+                ax.plot([x + sx, x - x / 2.0 + sx], [0, x / 2.0 * t3], 'k-', lw=0.5)
+                ax.plot([x + sx, (1 - x) / 2.0 + x + sx], [0, (1 - x) / 2.0 * t3], 'k-', lw=0.5)
+                ax.plot([x / 2 + sx, 1 - x / 2 + sx], [x / 2 * t3, x / 2 * t3], 'k-', lw=0.5)
+                if inner:
+                    ax.text(x + sx, -0.03, lab_bottom, ha='center', va='center')
+                    ax.text((1 - x) / 2.0 + x + sx + 0.026, (1 - x) / 2.0 * t3 + 0.015,
+                            lab_right, ha='center', va='center', rotation=-60)
+                    ax.text(x / 2 + sx - 0.026, x / 2 * t3 + 0.015,
+                            lab_left, ha='center', va='center', rotation=60)
+            # diamond
+            dx0 = 0.5 + offset + 0.5 * x
+            dx1 = 1 + offset + 0.5 * x
+            ax.plot([dx0, dx1], [h + offset * t3 + 0.5 * x * t3, offset * t3 + 0.5 * x * t3], 'k-', lw=0.5)
+            ax.plot([dx0, dx1], [h + offset * t3 - 0.5 * x * t3, 2 * h + offset * t3 - 0.5 * x * t3], 'k-', lw=0.5)
+            if inner:
+                ax.text(dx0 - 0.026, h + offset * t3 + 0.5 * x * t3 + 0.015, ticklabels[i],
+                        ha='center', va='center', rotation=60)
+                ax.text(dx1 + 0.026, offset * t3 + 0.5 * x * t3 - 0.015, ticklabels[-i - 1],
+                        ha='center', va='center', rotation=60)
+                ax.text(dx0 - 0.026, h + offset * t3 - 0.5 * x * t3 - 0.015, ticklabels[i],
+                        ha='center', va='center', rotation=-60)
+                ax.text(dx1 + 0.026, 2 * h + offset * t3 - 0.5 * x * t3 + 0.015, ticklabels[-i - 1],
+                        ha='center', va='center', rotation=-60)
+
+        # axis titles
+        c30, s30 = np.cos(np.pi / 30), np.sin(np.pi / 30)
+        ax.text(0.5, -offset, 'Ca$^{2+}$ (%)', ha='center', va='center')
+        ax.text(R + 0.5, -offset, 'Cl$^{-}$ (%)', ha='center', va='center')
+        ax.text(0.25 - offset * c30, 0.25 * t3 + offset * s30, 'Mg$^{2+}$ (%)',
+                ha='center', va='center', rotation=60)
+        ax.text(1.75 + 2 * offset + offset * c30, 0.25 * t3 + offset * s30, 'SO$_4^{2-}$ (%)',
+                ha='center', va='center', rotation=-60)
+        ax.text(0.75 + offset * c30, 0.25 * t3 + offset * s30, 'Na$^+$+K$^+$ (%)',
+                ha='center', va='center', rotation=-60)
+        ax.text(R + 0.25 - offset * c30, 0.25 * t3 + offset * s30, 'HCO$_3^-$+CO$_3^{2-}$ (%)',
+                ha='center', va='center', rotation=60)
+        ax.text(0.5 + 1.5 * offset + offset * c30, h + offset * t3 + 0.25 * t3 + offset * s30,
+                'SO$_4^{2-}$+Cl$^-$ (%)', ha='center', va='center', rotation=60)
+        ax.text(1.25 + offset + offset * c30, h + offset * t3 + 0.25 * t3 + offset * s30,
+                'Ca$^{2+}$+Mg$^{2+}$ (%)', ha='center', va='center', rotation=-60)
+
+        # coloured fields: cation triangle
+        ax.fill([0.25, 0.5, 0.75], [h / 2, 0, h / 2], color=PIPER['Mixed'], zorder=0, alpha=a, lw=0)
+        ax.fill([0.25, 0.5, 0.75], [h / 2, h, h / 2], color=PIPER['Mg'], zorder=0, alpha=a, lw=0)
+        ax.fill([0.0, 0.5, 0.25], [0, 0, h / 2], color=PIPER['Ca'], zorder=0, alpha=a, lw=0)
+        ax.fill([0.5, 1.0, 0.75], [0, 0, h / 2], color=PIPER['NaK'], zorder=0, alpha=a, lw=0)
+        # anion triangle
+        ax.fill([R + 0.25, R + 0.5, R + 0.75], [h / 2, 0, h / 2], color=PIPER['Mixed'], zorder=0, lw=0)
+        ax.fill([R, R + 0.5, R + 0.25], [0, 0, h / 2], color=PIPER['HCO3'], zorder=0, alpha=a, lw=0)
+        ax.fill([R + 0.5, R + 1.0, R + 0.75], [0, 0, h / 2], color=PIPER['Cl'], zorder=0, alpha=a, lw=0)
+        ax.fill([R + 0.25, R + 0.75, R + 0.5], [h / 2, h / 2, h], color=PIPER['SO4'], zorder=0, alpha=a, lw=0)
+        # diamond
+        x0 = 0.5 + offset + 0.25
+        yc = h + offset * t3                          # centre height of the diamond
+        s60 = 0.5 * np.sin(np.pi / 3)
+        ax.fill([x0, x0 + 0.5, x0 + 0.25], [yc - s60, yc - s60, yc], color=PIPER['Mixed'], zorder=0, lw=0)
+        ax.fill([x0, x0 + 0.25, x0 + 0.5], [yc + s60, yc, yc + s60], color=PIPER['Mixed'], zorder=0, lw=0)
+        ax.fill([x0, x0 + 0.5, x0 + 0.25], [yc - s60 + h, yc - s60 + h, yc + h],
+                color=PIPER['Ca-Cl'], zorder=0, alpha=a, lw=0)
+        ax.fill([x0, x0 + 0.25, x0 + 0.5], [yc + s60 - h, yc - h, yc + s60 - h],
+                color=PIPER['Na-HCO3'], zorder=0, alpha=a, lw=0)
+        ax.fill([0.5 + offset, x0, 0.5 + offset + 0.5, x0],
+                [1.2 * h, 1.7 * h, 1.2 * h, 0.7 * h], color=PIPER['Mg-HCO3'], zorder=0, alpha=a, lw=0)
+        ax.fill([1.0 + offset, x0 + 0.5, 1.5 + offset, x0 + 0.5],
+                [1.2 * h, 1.7 * h, 1.2 * h, 0.7 * h], color=PIPER['Na-Cl'], zorder=0, alpha=a, lw=0)
+
+        if show_types:
+            kw = dict(fontweight='bold', fontsize=10, ha='center')
+            ax.text(x0 + 0.25, yc + h, 'Ca-Cl', color=PIPER['Ca-Cl'], **kw)
+            ax.text(0.3 + offset, 1.2 * h, 'Mg-HCO$_3$', color=PIPER['Mg-HCO3'], **kw)
+            ax.text(1.62 + offset, 1.2 * h - 0.02, 'Na-Cl', color=PIPER['Na-Cl'], **kw)
+            ax.text(1.0 + offset, yc + s60 - h - 0.49, 'Na-HCO$_3$', color=PIPER['Na-HCO3'], **kw)
+
+        # the samples
+        styles = group_styles(v)
+        hollow = hollow_mask(v, ['piper'])
+        cvals = v[color_by] if color_by else None
+        mappable = None
+        for xc, yc_ in [('piper_cat_x', 'piper_cat_y'), ('piper_an_x', 'piper_an_y'),
+                        ('piper_d_x', 'piper_d_y')]:
+            m = _scatter(ax, v, v[xc], v[yc_], hollow, styles, cvals=cvals, size=28,
+                         legend=False, zorder=100)
+            mappable = m or mappable
+
+        plotted = v['piper_d_x'].notna()
+        if color_by and mappable is not None:
+            cb = fig.colorbar(mappable, ax=ax, orientation='vertical', fraction=0.025, pad=0.02,
+                              shrink=0.5)
+            cb.set_label(pretty(color_by))
+            handles = [Line2D([], [], ls='', marker=mk, mfc='0.6', mec='black', mew=0.5, ms=5, label=lab)
+                       for lab, (_, mk) in styles.items()]
+            if (hollow & plotted).any():
+                handles.append(Line2D([], [], ls='', marker='o', mfc='none', mec='0.3', ms=5,
+                                      label='Filled input (hollow)'))
+        else:
+            handles = _legend_handles(styles, (hollow & plotted).any())
+        ax.legend(handles=handles, frameon=False, labelspacing=0.3, handletextpad=0.3,
+                  loc='upper right', bbox_to_anchor=(1.02, 1.0))
+
+        if water_legend:
+            ax2 = fig.add_axes([0.0, 0.52, 0.2, 0.38])
+            ax2.axis('off')
+            for mk, key, lab in [('^', 'Mg', 'Mg'), ('^', 'Ca', 'Ca'), ('^', 'NaK', 'Na + K'),
+                                 ('^', 'HCO3', 'HCO$_3$ + CO$_3$'), ('^', 'Cl', 'Cl'),
+                                 ('^', 'SO4', 'SO$_4$'), ('^', 'Mixed', 'Mixed'),
+                                 ('^', 'Ca-Cl', 'Ca-Cl'), ('d', 'Na-Cl', 'Na-Cl'),
+                                 ('v', 'Na-HCO3', 'Na-HCO$_3$'), ('d', 'Mg-HCO3', 'Mg-HCO$_3$')]:
+                ax2.plot([], [], mk, ms=9, mfc=PIPER[key], alpha=1.0 if key == 'Mixed' else a,
+                         mew=0, label=lab)
+            ax2.legend(title='Fields', frameon=False, labelspacing=0.8, loc='upper left')
+    return fig
+
+
+# %% Schoeller
+def schoeller(v):
+    """Schoeller diagram: log meq/L across the major ions, one line per sample."""
+    ions = ['Ca', 'Mg', 'Na', 'K', 'Cl', 'SO4', 'HCO3']
+    ticks = ['Ca$^{2+}$', 'Mg$^{2+}$', 'Na$^+$', 'K$^+$', 'Cl$^-$', 'SO$_4^{2-}$', 'HCO$_3^-$']
+    with matplotlib.rc_context(STYLE):
+        fig = Figure(figsize=(17 * CM, 9 * CM), dpi=150)
+        ax = fig.add_axes([0.09, 0.1, 0.68, 0.86])
+        styles = group_styles(v)
+        hollow = hollow_mask(v, ['HCO3 (meq/L)'])
+        xs = np.arange(1, 8)
+        for i in v.index:
+            y = np.array([v.at[i, f'{a} (meq/L)'] for a in ions], dtype=float)
+            y[y <= 0] = np.nan
+            if np.isfinite(y).sum() < 2:
+                continue
+            col, mk = styles[v.at[i, 'Label']]
+            ax.plot(xs, y, color=col, marker=mk, ms=3.5, lw=0.8, alpha=0.8, mec='black', mew=0.3,
+                    ls='--' if hollow[i] else '-')
+        ax.set_yscale('log')
+        ax.set_xticks(xs)
+        ax.set_xticklabels(ticks)
+        ax.set_xlim(0.8, 7.2)
+        for x in xs:
+            ax.axvline(x, lw=0.5, color='0.7', ls='--', zorder=0)
+        ax.set_ylabel('Concentration (meq/L)')
+        handles = [Line2D([], [], color=col, marker=mk, ms=4, mec='black', mew=0.3, lw=0.8, label=lab)
+                   for lab, (col, mk) in styles.items()]
+        if hollow.any():
+            handles.append(Line2D([], [], color='0.3', ls='--', lw=0.8, label='Filled HCO$_3$ (dashed)'))
+        ax.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(1.01, 1.0))
+    return fig
+
+
+# %% Stiff
+def stiff(v, samples, ncols=4):
+    """A grid of Stiff diagrams on a common meq/L scale, filled by group colour."""
+    sub = v[v['Sample'].isin(samples)]
+    n = len(sub)
+    if n == 0:
+        return None
+    ncols = min(ncols, n)
+    nrows = int(np.ceil(n / ncols))
+    styles = group_styles(v)
+    need = ['Na+K (meq/L)', 'Ca (meq/L)', 'Mg (meq/L)', 'Cl (meq/L)', 'HCO3 (meq/L)', 'SO4 (meq/L)']
+    cmax = float(np.nanmax(sub[need].values)) if sub[need].notna().any().any() else 1.0
+    hollow = hollow_mask(v, ['HCO3 (meq/L)'])
+    with matplotlib.rc_context(STYLE):
+        fig = Figure(figsize=(17 * CM, (3.6 * nrows + 1.2) * CM), dpi=150)
+        axs = np.atleast_1d(fig.subplots(nrows, ncols)).ravel()
+        fig.subplots_adjust(left=0.07, right=0.93, top=1 - 0.5 / (3.6 * nrows + 1.2),
+                            bottom=1.3 / (3.6 * nrows + 1.2), wspace=0.55, hspace=0.75)
+        for ax, i in zip(axs, sub.index):
+            r = sub.loc[i, need].fillna(0).astype(float)
+            x = [-r.iloc[0], -r.iloc[1], -r.iloc[2], r.iloc[5], r.iloc[4], r.iloc[3], -r.iloc[0]]
+            y = [3, 2, 1, 1, 2, 3, 3]
+            col, _ = styles[sub.at[i, 'Label']]
+            if hollow[i]:
+                ax.fill(x, y, facecolor='none', edgecolor=col, lw=1.0, hatch='///')
+            else:
+                ax.fill(x, y, facecolor=col, alpha=0.6, edgecolor='black', lw=0.7)
+            ax.plot([0, 0], [0.8, 3.2], color='black', lw=0.6)
+            ax.set_xlim(-cmax * 1.05, cmax * 1.05)
+            ax.set_ylim(0.7, 3.3)
+            ax.set_yticks([])
+            for sp in ['left', 'right', 'top']:
+                ax.spines[sp].set_visible(False)
+            tk = np.array([-cmax, 0, cmax])
+            ax.set_xticks(tk)
+            ax.set_xticklabels([f'{abs(t):.3g}' for t in tk], fontsize=6)
+            ax.set_title(str(sub.at[i, 'Sample']), fontsize=8, pad=2)
+            for yy, lab in zip([3, 2, 1], ['Na+K', 'Ca', 'Mg']):
+                ax.text(-cmax * 1.08, yy, lab, ha='right', va='center', fontsize=6)
+            for yy, lab in zip([3, 2, 1], ['Cl', 'HCO$_3$', 'SO$_4$']):
+                ax.text(cmax * 1.08, yy, lab, ha='left', va='center', fontsize=6)
+        for ax in axs[n:]:
+            ax.axis('off')
+        fig.text(0.5, 0.01, 'meq/L (common scale). Hatched = filled HCO$_3$.', ha='center', fontsize=7)
+    return fig
+
+
+# %% WQChartPy pass-through
+WQ_DIAGRAMS = {'Durov': 'durvo', 'Gibbs': 'gibbs', 'Chadha': 'chadha', 'HFE-D': 'hfed'}
+
+
+def wqchartpy_figure(v, kind):
+    """Durov, Gibbs, Chadha or HFE-D exactly as WQChartPy draws them.
+
+    WQChartPy wants mg/L columns named by ion, plus Label/Color/Marker/Size/
+    Alpha, and it saves to disk as a side effect. We build that frame, let it
+    write into a temporary folder, and hand back the open figure.
+    """
+    import importlib
+    import matplotlib.pyplot as plt
+
+    styles = group_styles(v)
+    w = pd.DataFrame({'Sample': v['Sample'], 'Label': v['Label']})
+    w['Color'] = [styles[l][0] for l in v['Label']]
+    w['Marker'] = [styles[l][1] for l in v['Label']]
+    w['Size'] = 30
+    w['Alpha'] = 0.8
+    w['pH'] = v['pH']
+    for a in ['Ca', 'Mg', 'Na', 'K', 'HCO3', 'CO3', 'Cl', 'SO4']:
+        w[a] = v[f'{a} (mg/L)']
+    w['CO3'] = w['CO3'].fillna(0)
+    w['K'] = w['K'].fillna(0)
+    w['TDS'] = v['TDS (mg/L)']
+    w = w.dropna(subset=['pH', 'Ca', 'Mg', 'Na', 'HCO3', 'Cl', 'SO4', 'TDS']).reset_index(drop=True)
+    note = ''
+    if kind == 'Durov':
+        # WQChartPy's Durov has a fixed TDS axis that ends at 4000 mg/L. One
+        # saline sample beyond it stretches the axes and flattens the diagram.
+        over = w['TDS'] > 4000
+        if over.any():
+            note = f'{int(over.sum())} sample(s) with TDS above 4000 mg/L are not shown: the WQChartPy Durov has a fixed TDS axis.'
+            w = w[~over].reset_index(drop=True)
+    if w.empty:
+        return None, note
+
+    module = importlib.import_module('wqchartpy.' + WQ_DIAGRAMS[kind])
+    before = set(plt.get_fignums())
+    with tempfile.TemporaryDirectory() as tmp:
+        module.plot(w, unit='mg/L', figname=os.path.join(tmp, 'fig'), figformat='png')
+    new = [n for n in plt.get_fignums() if n not in before]
+    if not new:
+        return None, note
+    fig = plt.figure(new[-1])
+    for n in new[:-1]:
+        plt.close(n)
+    return fig, note
+
+
+# %% diagnostic gallery
+# Each panel: x and y are column names in the table `v`.
+#   lines: reference lines, each one of
+#     ('slope', m, label)      y = m x through the origin
+#     ('h', value, label)      horizontal line
+#     ('v', value, label)      vertical line
+#     ('sw', ion)              seawater dilution line for ion against Cl
+#     ('swratio', ratio_value) horizontal seawater ratio
+#   xlog / ylog: default scales (ratios and Cl span decades)
+def _sw(ion):
+    return SEAWATER_MMOL[ion] / SEAWATER_MMOL['Cl']
+
+
+def _ion_vs_cl(ion):
+    lines = [('sw', ion)] if ion in SEAWATER_MMOL else []
+    if ion == 'Na':
+        lines.append(('slope', 1.0, '1:1 (halite)'))
+    return dict(x='Cl (mmol/L)', y=f'{ion} (mmol/L)', lines=lines, conc=True)
+
+
+def _ratio_vs_cl(ratio, sw=None):
+    lines = [('h', sw, 'Seawater')] if sw else []
+    if ratio == 'Na/Cl':
+        lines.append(('h', 1.0, 'Halite'))
+    return dict(x='Cl (mmol/L)', y=ratio, lines=lines, xlog=True)
+
+
+_SI_MAIN = ['Calcite', 'Dolomite', 'Gypsum', 'Halite', 'Fluorite', 'Chalcedony']
+_SI_MORE = ['Aragonite', 'Anhydrite', 'Quartz', 'Barite', 'Celestite', 'Strontianite']
+_ZERO = [('h', 0.0, 'Saturation')]
+
+GALLERY = {
+    'Major ions against Cl': [_ion_vs_cl(i) for i in ['Na', 'K', 'Ca', 'Mg', 'HCO3', 'SO4']],
+    'Minor ions against Cl': [_ion_vs_cl(i) for i in ['Br', 'F', 'NO3', 'Sr', 'SiO2', 'Ba']],
+    'Ion/Cl ratios against Cl': [
+        _ratio_vs_cl('Na/Cl', _sw('Na')), _ratio_vs_cl('K/Cl', _sw('K')),
+        _ratio_vs_cl('Ca/Cl', _sw('Ca')), _ratio_vs_cl('Mg/Cl', _sw('Mg')),
+        _ratio_vs_cl('SO4/Cl', _sw('SO4')), _ratio_vs_cl('HCO3/Cl', _sw('HCO3')),
+        _ratio_vs_cl('Cl/Br', 1.0 / _sw('Br')), _ratio_vs_cl('Sr/Cl', _sw('Sr')),
+        _ratio_vs_cl('F/Cl', _sw('F')), _ratio_vs_cl('NO3/Cl'),
+        _ratio_vs_cl('Ca/Mg', SEAWATER_MMOL['Ca'] / SEAWATER_MMOL['Mg']),
+        _ratio_vs_cl('Na/K', SEAWATER_MMOL['Na'] / SEAWATER_MMOL['K']),
+    ],
+    'Ratios against TDS': [
+        dict(x='TDS (mg/L)', y='Na/Cl', lines=[('h', _sw('Na'), 'Seawater'), ('h', 1.0, 'Halite')], xlog=True),
+        dict(x='TDS (mg/L)', y='HCO3/Cl', lines=[], xlog=True, ylog=True),
+        dict(x='TDS (mg/L)', y='Cl/Br', lines=[('h', 1.0 / _sw('Br'), 'Seawater')], xlog=True),
+        dict(x='TDS (mg/L)', y='Ca/Mg', lines=[('h', 1.0, 'Dolomite (1:1)')], xlog=True),
+        dict(x='TDS (mg/L)', y='SO4/Cl', lines=[('h', _sw('SO4'), 'Seawater')], xlog=True, ylog=True),
+        dict(x='TDS (mg/L)', y='(Ca+Mg)/(HCO3+SO4)', lines=[('h', 1.0, '1:1')], xlog=True),
+    ],
+    'Water-rock processes': [
+        dict(x='Cl (meq/L)', y='Na (meq/L)', lines=[('slope', 1.0, '1:1 (halite)'), ('slope', _sw('Na'), 'Seawater')]),
+        dict(x='HCO3+SO4 (meq/L)', y='Ca+Mg (meq/L)', lines=[('slope', 1.0, '1:1 (carbonate + gypsum)')]),
+        dict(x='HCO3 (meq/L)', y='Ca+Mg (meq/L)', lines=[('slope', 1.0, '1:1 (carbonate dissolution)')]),
+        dict(x='SO4 (meq/L)', y='Ca (meq/L)', lines=[('slope', 1.0, '1:1 (gypsum)')]),
+        dict(x='HCO3 (meq/L)', y='Ca (meq/L)', lines=[('slope', 1.0, '1:1 (calcite)'), ('slope', 0.5, '1:2 (dolomite)')]),
+        dict(x='Ca (mmol/L)', y='Mg (mmol/L)', lines=[('slope', 1.0, '1:1 (dolomite)')]),
+        dict(x='Ca+Mg-HCO3-SO4 (meq/L)', y='Na+K-Cl (meq/L)', lines=[('slope', -1.0, 'Slope -1 (cation exchange)')], origin=True),
+        dict(x='Cl (mmol/L)', y='CAI-1', lines=[('h', 0.0, 'No exchange')], xlog=True),
+        dict(x='SO4 (meq/L)', y='Ca+Mg-HCO3 (meq/L)', lines=[('slope', 1.0, '1:1 (gypsum)')], origin=True),
+        dict(x='SiO2 (mmol/L)', y='HCO3 (mmol/L)', lines=[]),
+        dict(x='Na (mmol/L)', y='SiO2 (mmol/L)', lines=[]),
+        dict(x='SiO2 (mmol/L)', y='Na+K-Cl (meq/L)', lines=[('h', 0.0, 'Na + K = Cl')]),
+    ],
+    'Saturation indices against Cl': [
+        dict(x='Cl (mmol/L)', y=f'SI {m}', lines=_ZERO, xlog=True) for m in _SI_MAIN + _SI_MORE],
+    'Saturation indices against TDS': [
+        dict(x='TDS (mg/L)', y=f'SI {m}', lines=_ZERO, xlog=True) for m in _SI_MAIN + _SI_MORE],
+    'Saturation indices against pH': [
+        dict(x='pH', y=f'SI {m}', lines=_ZERO) for m in _SI_MAIN + _SI_MORE],
+    'Carbonate system': [
+        dict(x='pH', y='log pCO2', lines=[('h', -3.38, 'Atmosphere (~420 ppm)')]),
+        dict(x='log pCO2', y='SI Calcite', lines=_ZERO),
+        dict(x='SI Calcite', y='SI Dolomite', lines=[('h', 0.0, None), ('v', 0.0, None)]),
+        dict(x='HCO3 (mmol/L)', y='SI Calcite', lines=_ZERO),
+        dict(x='Ca (mmol/L)', y='SI Calcite', lines=_ZERO),
+        dict(x='SI Gypsum', y='SI Calcite', lines=[('h', 0.0, None), ('v', 0.0, None)]),
+    ],
+    'Quality checks': [
+        dict(x='TDS (mg/L)', y='CBE (%)', lines=[('h', 5.0, '+/- 5 %'), ('h', -5.0, None)], xlog=True),
+        dict(x='Sum anions (meq/L)', y='Sum cations (meq/L)', lines=[('slope', 1.0, '1:1')]),
+        dict(x='TDS calc (mg/L)', y='TDS (mg/L)', lines=[('slope', 1.0, '1:1')]),
+        dict(x='EC', y='TDS (mg/L)', lines=[('slope', 0.55, 'TDS = 0.55 EC'), ('slope', 0.75, 'TDS = 0.75 EC')]),
+        dict(x='EC', y='SC calc (uS/cm)', lines=[('slope', 1.0, '1:1')]),
+        dict(x='Cl (mmol/L)', y='Ionic strength (mol/kgw)', lines=[('h', 0.5, 'phreeqc.dat caution')], xlog=True, ylog=True),
+    ],
+}
+
+_LINE_STYLES = ['--', ':', '-.']
+
+
+def available(v, panel):
+    """A panel is drawn only if both variables exist and share at least one sample."""
+    x, y = panel['x'], panel['y']
+    if x not in v.columns or y not in v.columns:
+        return False
+    return bool((v[x].notna() & v[y].notna()).any())
+
+
+def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
+    x, y = v[panel['x']], v[panel['y']]
+    xlog = panel.get('xlog', False) or (log_conc and panel.get('conc', False))
+    ylog = panel.get('ylog', False) or (log_conc and panel.get('conc', False))
+    if xlog:
+        x = x.where(x > 0)
+    if ylog:
+        y = y.where(y > 0)
+    hollow = hollow_mask(v, [panel['x'], panel['y']])
+    mappable = _scatter(ax, v, x, y, hollow, styles, cvals=cvals, legend=False)
+
+    ok = x.notna() & y.notna()
+    if xlog:
+        ax.set_xscale('log')
+    if ylog:
+        ax.set_yscale('log')
+    # Freeze the data limits before adding reference lines so a seawater line
+    # cannot stretch the axes away from the samples.
+    if ok.any() and not xlog and not ylog and not panel.get('origin', False):
+        if x[ok].min() >= 0:
+            ax.set_xlim(left=0)
+        if y[ok].min() >= 0 and not panel['y'].startswith(('SI ', 'log ', 'CBE', 'CAI')):
+            ax.set_ylim(bottom=0)
+    ax.margins(0.08)
+    ax.autoscale_view()
+    xl, yl = ax.get_xlim(), ax.get_ylim()
+    xs = np.geomspace(max(xl[0], 1e-12), xl[1], 50) if xlog else np.linspace(xl[0], xl[1], 50)
+
+    k = 0
+    for line in panel.get('lines', []):
+        kind = line[0]
+        ls = _LINE_STYLES[k % len(_LINE_STYLES)]
+        if kind == 'sw':
+            ax.plot(xs, xs * _sw(line[1]), ls=ls, color='0.35', lw=0.8, zorder=1, label='Seawater ratio')
+        elif kind == 'slope':
+            ax.plot(xs, xs * line[1], ls=ls, color='0.35', lw=0.8, zorder=1, label=line[2])
+        elif kind == 'h':
+            ax.axhline(line[1], ls=ls, color='0.35', lw=0.8, zorder=1, label=line[2])
+        elif kind == 'v':
+            ax.axvline(line[1], ls=ls, color='0.35', lw=0.8, zorder=1, label=line[2])
+        k += 1
+    ax.set_xlim(xl)
+    ax.set_ylim(yl)
+    if panel.get('origin', False):
+        ax.axhline(0, color='0.8', lw=0.5, zorder=0)
+        ax.axvline(0, color='0.8', lw=0.5, zorder=0)
+
+    ax.set_xlabel(pretty(panel['x']) + (' (molar)' if '/' in panel['x'] and '(' not in panel['x'] else ''))
+    ax.set_ylabel(pretty(panel['y']) + (' (molar)' if '/' in panel['y'] and '(' not in panel['y'] else ''))
+    handles, labels = ax.get_legend_handles_labels()
+    keep = [(h_, l_) for h_, l_ in zip(handles, labels) if l_ and not l_.startswith('_')]
+    if keep:
+        ax.legend(*zip(*keep), frameon=False, fontsize=6, loc='best', handlelength=2.2)
+    return mappable, hollow & ok
+
+
+def gallery_page(v, panels, log_conc=False, color_by=None):
+    """Up to six panels, 2 across by 3 down, with one shared group legend.
+
+    Layout follows plot_major_ions in PiperScript.py (17 cm wide, legend along
+    the bottom).
+    """
+    panels = [p for p in panels if available(v, p)]
+    if not panels:
+        return None
+    n = len(panels)
+    nrows = int(np.ceil(n / 2))
+    height = 4.6 * nrows + 1.6
+    styles = group_styles(v)
+    cvals = v[color_by] if color_by else None
+    with matplotlib.rc_context(STYLE):
+        fig = Figure(figsize=(17 * CM, height * CM), dpi=150)
+        axs = np.atleast_1d(fig.subplots(nrows, 2)).ravel()
+        fig.subplots_adjust(left=0.09, right=0.86 if color_by else 0.98, top=1 - 0.3 / height,
+                            bottom=2.2 / height, hspace=0.42, wspace=0.28)
+        any_hollow = False
+        mappable = None
+        for ax, p in zip(axs, panels):
+            m, hol = _draw_panel(ax, v, p, styles, log_conc, cvals=cvals)
+            mappable = m or mappable
+            any_hollow = any_hollow or bool(hol.any())
+        for ax in axs[n:]:
+            ax.axis('off')
+        if color_by and mappable is not None:
+            cax = fig.add_axes([0.89, 0.25, 0.018, 0.5])
+            fig.colorbar(mappable, cax=cax).set_label(pretty(color_by))
+            handles = [Line2D([], [], ls='', marker=mk, mfc='0.6', mec='black', mew=0.5, ms=5, label=lab)
+                       for lab, (_, mk) in styles.items()]
+            if any_hollow:
+                handles.append(Line2D([], [], ls='', marker='o', mfc='none', mec='0.3', ms=5,
+                                      label='Filled input (hollow)'))
+        else:
+            handles = _legend_handles(styles, any_hollow)
+        fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.0),
+                   ncol=min(4, len(handles)), frameon=False)
+    return fig
+
+
+# %% custom plot
+def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zero_line=False,
+           annotate=False):
+    """Any plottable column against any other."""
+    panel = dict(x=x, y=y, xlog=xlog, ylog=ylog, lines=[], origin=True)
+    if one_to_one:
+        panel['lines'].append(('slope', 1.0, '1:1'))
+    if zero_line:
+        panel['lines'].append(('h', 0.0, 'y = 0'))
+    styles = group_styles(v)
+    cvals = v[color_by] if color_by else None
+    with matplotlib.rc_context(STYLE):
+        fig = Figure(figsize=(17 * CM, 10 * CM), dpi=150)
+        ax = fig.add_axes([0.1, 0.13, 0.58, 0.83])
+        mappable, hol = _draw_panel(ax, v, panel, styles, False, cvals=cvals)
+        if annotate:
+            ok = v[x].notna() & v[y].notna()
+            for i in v.index[ok]:
+                ax.annotate(str(v.at[i, 'Sample']), (v.at[i, x], v.at[i, y]), fontsize=5,
+                            xytext=(3, 3), textcoords='offset points')
+        if color_by and mappable is not None:
+            cax = fig.add_axes([0.72, 0.13, 0.015, 0.35])
+            fig.colorbar(mappable, cax=cax).set_label(pretty(color_by))
+            handles = [Line2D([], [], ls='', marker=mk, mfc='0.6', mec='black', mew=0.5, ms=5, label=lab)
+                       for lab, (_, mk) in styles.items()]
+            if hol.any():
+                handles.append(Line2D([], [], ls='', marker='o', mfc='none', mec='0.3', ms=5,
+                                      label='Filled input (hollow)'))
+        else:
+            handles = _legend_handles(styles, bool(hol.any()))
+        fig.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(0.69, 0.96))
+    return fig
+
+
+# %% export helper
+def fig_png(fig, dpi=300):
+    import io
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')
+    return buf.getvalue()

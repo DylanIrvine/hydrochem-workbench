@@ -1,0 +1,40 @@
+# Runs the whole app headless on the synthetic data and clicks through the
+# controls that change what is drawn.
+import os
+
+from streamlit.testing.v1 import AppTest
+
+APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app.py')
+
+
+def test_app_runs_on_example_data():
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    assert not at.exception
+    at.checkbox[0].check().run()                 # synthetic example data
+    assert not at.exception
+    assert len(at.error) == 0
+    assert any('filled' in i.value for i in at.info)
+
+    def go(view):
+        at.radio[0].set_value(view).run()
+        assert not at.exception
+
+    for label in ['From charge balance', 'Fixed value']:
+        [s for s in at.selectbox if s.label == 'Missing HCO3'][0].select(label).run()
+        assert not at.exception
+    go('Piper')
+    go('Classical diagrams')
+    for diagram in ['Stiff', 'Durov', 'Gibbs', 'Chadha', 'HFE-D']:
+        [s for s in at.selectbox if s.label == 'Diagram'][0].select(diagram).run()
+        assert not at.exception
+    go('Diagnostic gallery')
+    plot_set = [s for s in at.selectbox if s.label == 'Plot set'][0]
+    for group in plot_set.options:
+        plot_set.select(group).run()
+        assert not at.exception
+    [s for s in at.selectbox if s.key == 'gallery_color'][0].select('pH').run()
+    assert not at.exception
+    go('Custom plot')
+    go('Export')
+    assert any(b.label == 'Build a zip of every figure' for b in at.button)

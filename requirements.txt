@@ -1,0 +1,8 @@
+# Set the deploy Python version to 3.12 or 3.13 (Streamlit Cloud: app settings).
+streamlit>=1.40
+numpy>=1.26
+pandas>=2.0
+matplotlib>=3.8
+openpyxl>=3.1
+phreeqpython>=1.5.5
+wqchartpy>=0.1.10
