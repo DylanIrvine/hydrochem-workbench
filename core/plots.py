@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.colors as mcolors
+import matplotlib.text
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, NullFormatter
@@ -40,6 +41,9 @@ from matplotlib.ticker import FuncFormatter, NullFormatter
 from core.chem import SEAWATER_MMOL, hollow_mask
 
 CM = 1.0 / 2.54
+
+# no italics in maths text (e.g. HCO$_3$), on any figure
+matplotlib.rcParams['mathtext.default'] = 'regular'
 
 # %% style
 # Arial if available, otherwise Liberation Sans
@@ -231,7 +235,7 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
                 [1.2 * h, 1.7 * h, 1.2 * h, 0.7 * h], color=PIPER['Na-Cl'], zorder=0, alpha=a, lw=0)
 
         if show_types:
-            kw = dict(fontweight='bold', fontsize=10, ha='center')
+            kw = dict(fontsize=10, ha='center')
             ax.text(x0 + 0.25, yc + h, 'Ca-Cl', color=PIPER['Ca-Cl'], **kw)
             ax.text(0.3 + offset, 1.2 * h, 'Mg-HCO$_3$', color=PIPER['Mg-HCO3'], **kw)
             ax.text(1.62 + offset, 1.2 * h - 0.02, 'Na-Cl', color=PIPER['Na-Cl'], **kw)
@@ -401,6 +405,15 @@ def wqchartpy_figure(v, kind):
     fig = plt.figure(new[-1])
     for n in new[:-1]:
         plt.close(n)
+    # WQChartPy uses bold and italic text and changes the global settings. Put
+    # every label back to plain text
+    matplotlib.rcParams['mathtext.default'] = 'regular'
+    for t in fig.findobj(matplotlib.text.Text):
+        t.set_fontweight('normal')
+        t.set_fontstyle('normal')
+        t.set_fontfamily(STYLE['font.sans-serif'])
+    matplotlib.rcdefaults()
+    matplotlib.rcParams['mathtext.default'] = 'regular'
     return fig, note
 
 
@@ -632,7 +645,7 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
         yl = [min(yl[0], 5), max(yl[1], 50000)]
         for fx, fy, txt in [(0.97, 0.08, 'Precipitation\ndominance'), (0.03, 0.5, 'Rock\ndominance'),
                             (0.97, 0.92, 'Evaporation\ndominance')]:
-            ax.text(fx, fy, txt, transform=ax.transAxes, fontsize=6, color='0.35', style='italic',
+            ax.text(fx, fy, txt, transform=ax.transAxes, fontsize=6, color='0.35',
                     ha='right' if fx > 0.5 else 'left', va='center', zorder=2)
     if 'band' in panel:
         ax.axhspan(panel['band'][0], panel['band'][1], color='0.85', alpha=0.6, lw=0, zorder=0,

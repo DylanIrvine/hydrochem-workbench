@@ -25,6 +25,10 @@ def test_app_runs_on_example_data(tmp_path, monkeypatch):
     for label in ['From charge balance', 'Fixed value']:
         [s for s in at.selectbox if s.label == 'Missing alkalinity'][0].select(label).run()
         assert not at.exception
+    go('Guidelines')
+    ms = [m for m in at.multiselect if m.label == 'Guideline sets'][0]
+    ms.set_value(ms.options).run()
+    assert not at.exception
     go('Piper')
     go('Classical diagrams')
     for diagram in ['Stiff', 'Durov', 'Gibbs', 'Chadha', 'HFE-D']:

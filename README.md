@@ -20,7 +20,9 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    meq/L, chosen in the app). Alkalinity goes in as the lab reports it, in mg/L
    as CaCO3: total alkalinity, or bicarbonate and carbonate alkalinity. HCO3 and
    CO3 are not inputs. PHREEQC calculates both from alkalinity and pH, and those
-   values are used in every plot. Nitrate can be as NO3 or as N. Any extra
+   values are used in every plot. Where there is no alkalinity, DIC (mg/L as C
+   or mmol/L) can be given instead and PHREEQC works from DIC and pH. Nitrate
+   and ammonium can be as the ion or as N, phosphate as PO4 or as P. Any extra
    numeric column (depth, isotopes) is carried through and can be plotted.
 2. **Missing values.** Missing pH, temperature and alkalinity are filled (dataset
    mean, a fixed value, or for alkalinity the charge-balance value). Filled samples
@@ -31,7 +33,13 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    chalcedony, barite, celestite and strontianite (each only where its elements
    were measured), log pCO2, ionic strength and calculated conductivity. A
    warning appears above 0.5 mol/kgw ionic strength.
-4. **Plots.**
+4. **Guidelines.** Each sample is compared with Australian guideline values:
+   drinking water (ADWG health and aesthetic), ANZG toxicant default guideline
+   values for fresh and marine ecosystems (95% protection), and the ANZECC 2000
+   nutrient, pH and EC values for tropical Australia by ecosystem type. All the
+   numbers are in `core/guidelines.py` with their sources. It is a screening
+   comparison, not a compliance assessment.
+5. **Plots.**
    - Piper, in the coloured-field style from `PiperScript.py`
    - Schoeller and Stiff, native, same style
    - Durov, Gibbs, Chadha and HFE-D passed through from WQChartPy as is
@@ -43,7 +51,7 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
      TDS, Cl, pH, their own ions and each other, the carbonate system,
      irrigation quality (SAR, percent Na) and quality checks
    - Custom plot: any variable against any other
-5. **Export.** Results table with every derived variable and the settings used;
+6. **Export.** Results table with every derived variable and the settings used;
    a zip of all figures.
 
 ## Privacy
@@ -65,6 +73,7 @@ usage statistics.
 
     app.py            Streamlit front end
     core/chem.py      template, cleaning, units, fill rules, PHREEQC, derived table
+    core/guidelines.py  guideline values and the comparison
     core/plots.py     all figures
     core/usage.py     the usage counter
     logo/             hex badge (svg, png) and favicon
@@ -78,6 +87,8 @@ usage statistics.
 - No redox: there is no pe/Eh column, so no iron, manganese or sulfide phases.
 - The four WQChartPy diagrams keep WQChartPy's styling, and its Durov has a
   fixed TDS axis (0 to 4000 mg/L).
+- Guideline values for nutrients, pH and EC cover tropical Australia only, and
+  total N and total P are not in the template.
 - The bundled example data are synthetic.
 
 ## Licence
@@ -91,7 +102,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D. (2026). Hydrochem Workbench (version 0.4) [Web application].
+Irvine, D. (2026). Hydrochem Workbench (version 0.5) [Web application].
 Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).

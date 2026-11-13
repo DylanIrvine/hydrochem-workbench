@@ -25,13 +25,13 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from core import chem, plots
+from core import chem, guidelines, plots
 from core.usage import increment as _record_use, status as _usage_status
 
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.4'
+APP_VERSION = '0.5'
 PANELS_PER_PAGE = 6
 DEFAULT_PH = 7.0
 DEFAULT_TEMP = 25.0
@@ -57,7 +57,8 @@ st.write(
     'the plots a hydrogeochemist would make first. Download the template from the sidebar, paste '
     'your data in (one row per sample, one unit for every ion, alkalinity as CaCO3 straight from '
     'the lab report), choose the unit and upload it.\n\n'
-    'What comes back: charge balance, water type, saturation indices and pCO2, a Piper diagram, the '
+    'What comes back: charge balance, water type, saturation indices and pCO2, a comparison with '
+    'Australian water quality guidelines, a Piper diagram, the '
     'classical diagrams, a gallery of diagnostic ion, ratio and saturation-index plots with '
     'reference lines, and a builder for any plot the gallery does not have. The database is '
     'phreeqc.dat, so results are for fresh water; saline samples are flagged.')
@@ -181,6 +182,19 @@ with st.expander('**How to cite and references**'):
         'Publishers, Boca Raton. (Source of the source-rock ratio thresholds.)\n\n'
         'Richards, L.A. (ed.) (1954). Diagnosis and improvement of saline and alkali soils. USDA '
         'Agriculture Handbook 60. (Sodium adsorption ratio.)\n\n'
+        '**Water quality guidelines**\n\n'
+        'ANZG (2018). Australian and New Zealand Guidelines for Fresh and Marine Water Quality. '
+        'Australian and New Zealand Governments and Australian state and territory governments, '
+        'Canberra. https://www.waterquality.gov.au/anz-guidelines\n\n'
+        'ANZECC and ARMCANZ (2000). Australian and New Zealand Guidelines for Fresh and Marine Water '
+        'Quality. Volume 1. Australian and New Zealand Environment and Conservation Council and '
+        'Agriculture and Resource Management Council of Australia and New Zealand, Canberra.\n\n'
+        'ANZG (2025). Toxicant default guideline values for aquatic ecosystem protection: nitrate in '
+        'freshwater. Technical brief.\n\n'
+        'NHMRC and NRMMC (2011, with later updates). Australian Drinking Water Guidelines 6. National '
+        'Health and Medical Research Council, Canberra. '
+        'https://guidelines.nhmrc.gov.au/australian-drinking-water-guidelines\n\n'
+        '**Other**\n\n'
         'Gimenez-Forcada, E. (2010). Dynamic of sea water interface using hydrochemical facies '
         'evolution diagram. Groundwater, 48(2), 212-216. '
         'https://doi.org/10.1111/j.1745-6584.2009.00649.x')
@@ -194,10 +208,10 @@ def get_phreeqc():
     return phreeqpython.PhreeqPython(database='phreeqc.dat')
 
 
-def process(raw, unit, no3_as_n, rules):
+def process(raw, unit, n_as_n, p_as_p, dic_unit, rules):
     # clean, convert, fill, run PHREEQC
     # results are kept in session_state (not st.cache_data) so nothing is held after the user leaves
-    key = hashlib.sha1((raw.to_csv() + repr((unit, no3_as_n, rules))).encode()).hexdigest()
+    key = hashlib.sha1((raw.to_csv() + repr((unit, n_as_n, p_as_p, dic_unit, rules))).encode()).hexdigest()
     cached = st.session_state.get('result')
     if cached is not None and cached[0] == key:
         return cached[1]
@@ -208,7 +222,7 @@ def process(raw, unit, no3_as_n, rules):
         if any(not p.startswith('Duplicate') for p in problems):
             out = (None, dropped, None, problems)
         else:
-            mmol, alk_source = chem.to_mmol(df, unit, no3_as_n)
+            mmol, alk_source = chem.to_mmol(df, unit, n_as_n, p_as_p, dic_unit)
             df, mmol, filled = chem.fill_missing(df, mmol, dict(rules))
             phreeqc, errors, mmol = chem.run_phreeqc(df, mmol, get_phreeqc())
             out = (chem.build_table(df, mmol, filled, phreeqc, extra_cols, alk_source), dropped, errors, problems)
@@ -236,8 +250,12 @@ with st.sidebar:
     unit = st.selectbox('Concentration unit (ion columns)', chem.UNITS, index=0)
     st.caption('**Alkalinity** goes in as it appears on the lab report: total alkalinity, or '
                'bicarbonate and carbonate alkalinity, in mg/L as CaCO3 (whatever unit the ions are '
-               'in). Do not convert it. HCO3 and CO3 are calculated by PHREEQC from alkalinity and pH.')
-    no3_choice = st.selectbox('NO3 column holds', ['Nitrate as NO3', 'Nitrate as N'])
+               'in). Do not convert it. HCO3 and CO3 are calculated by PHREEQC from alkalinity and pH, '
+               'or from DIC and pH where there is no alkalinity.')
+    n_choice = st.selectbox('NO3 and NH4 columns hold', ['The ion (NO3, NH4)', 'As N (NO3-N, NH3-N)'])
+    p_choice = st.selectbox('PO4 column holds', ['Phosphate as PO4', 'Phosphate as P'])
+    dic_unit = st.selectbox('DIC column is in', ['mg/L as C', 'mmol/L'],
+                            help='DIC is only used for samples with no alkalinity.')
 
     st.header('3. Missing values')
     st.caption('Missing pH, temperature and alkalinity are filled so every sample can be '
@@ -270,7 +288,8 @@ else:
     st.info('Upload a filled template, or tick the synthetic example in the sidebar, to begin.')
     st.stop()
 
-v, dropped, errors, problems = process(raw, unit, no3_choice.endswith('as N'), rules)
+v, dropped, errors, problems = process(raw, unit, n_choice.startswith('As N'), p_choice.endswith('as P'),
+                                       dic_unit, rules)
 for p in problems:
     st.error(p)
 if v is None:
@@ -302,7 +321,8 @@ if errors is not None and len(errors):
 
 numeric_choices = chem.plottable(v)
 # radio buttons and not st.tabs, as tabs redraw every figure on every click
-VIEWS = ['Data and checks', 'Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot', 'Export']
+VIEWS = ['Data and checks', 'Guidelines', 'Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot',
+         'Export']
 view = st.radio('View', VIEWS, horizontal=True, label_visibility='collapsed')
 
 # %% view: data
@@ -330,6 +350,39 @@ if view == 'Data and checks':
     if errors is not None and len(errors):
         st.subheader('PHREEQC errors')
         st.dataframe(errors, hide_index=True)
+
+# %% view: guidelines
+GUIDE_DEFAULT = ['Drinking water: health (ADWG)', 'Drinking water: aesthetic (ADWG)']
+guide_sets = st.session_state.get('guide_sets', GUIDE_DEFAULT)
+guide_eco = st.session_state.get('guide_eco', 'Lowland river')
+if view == 'Guidelines':
+    st.subheader('Comparison with Australian water quality guidelines')
+    guide_sets = st.multiselect('Guideline sets', guidelines.set_names(), default=guide_sets, key='guide_sets')
+    if guidelines.TROPICAL_NAME in guide_sets:
+        guide_eco = st.selectbox('Ecosystem type (tropical Australia)', list(guidelines.TROPICAL),
+                                 index=list(guidelines.TROPICAL).index(guide_eco), key='guide_eco')
+    if not guide_sets:
+        st.info('Choose at least one guideline set.')
+    else:
+        g_summary, g_flags = guidelines.assess(v, guide_sets, guide_eco)
+        c1, c2 = st.columns(2)
+        c1.metric('Samples outside at least one value', f"{int((g_flags['Count'] > 0).sum())} of {len(g_flags)}")
+        c2.metric('Guideline values checked', len(g_summary))
+        st.markdown('**By guideline value**')
+        st.dataframe(g_summary.style.apply(
+            lambda r: ['background-color: rgba(255, 75, 75, 0.25)' if r['Outside guideline'] > 0 else ''] * len(r),
+            axis=1), use_container_width=True, hide_index=True)
+        st.markdown('**By sample**')
+        st.dataframe(g_flags[g_flags['Count'] > 0], use_container_width=True, hide_index=True)
+    st.caption(
+        'This is a screening comparison of single samples, not a compliance assessment. '
+        'Fresh or marine is your choice: pick the set that matches the water body. '
+        'The ANZG aquatic ecosystem values were derived for fresh and marine surface waters, not for '
+        'groundwater or for brackish or hypersaline water, and are meant to be compared with the '
+        'median of monitoring data, with site-specific values preferred where they exist. '
+        'Total N and total P are not in the template, so those guideline values are not checked. '
+        'The physical and chemical stressor values are included for tropical Australia only. '
+        'Guideline values are revised from time to time: check the current source before relying on them.')
 
 # %% view: Piper
 if view == 'Piper':
@@ -409,9 +462,9 @@ if view == 'Custom plot':
 if view == 'Export':
     st.subheader('Results table')
     out_cols = [c for c in v.columns if not c.startswith('piper_') and c not in ('Color', 'Marker')]
-    settings = pd.DataFrame({'Setting': ['App version', 'Database', 'Input unit', 'Alkalinity', 'NO3 column',
+    settings = pd.DataFrame({'Setting': ['App version', 'Database', 'Input unit', 'Alkalinity', 'N species', 'PO4 column', 'DIC unit',
                                          'Missing pH', 'Missing temperature', 'Missing alkalinity'],
-                             'Value': [APP_VERSION, 'phreeqc.dat (phreeqpython)', unit, 'mg/L as CaCO3; HCO3 and CO3 from PHREEQC (see "Alkalinity from" column)', no3_choice,
+                             'Value': [APP_VERSION, 'phreeqc.dat (phreeqpython)', unit, 'mg/L as CaCO3; HCO3 and CO3 from PHREEQC (see "Alkalinity from" column)', n_choice, p_choice, dic_unit,
                                        ph_how + (f' ({ph_val})' if ph_how == 'Fixed value' else ''),
                                        t_how + (f' ({t_val})' if t_how == 'Fixed value' else ''),
                                        h_how + (f' ({h_val} mg/L as CaCO3)' if h_how == 'Fixed value' else '')]})
@@ -421,6 +474,10 @@ if view == 'Export':
         settings.to_excel(xl, sheet_name='Settings', index=False)
         if n_dropped:
             dropped.astype(str).to_excel(xl, sheet_name='Cells treated as missing', index=False)
+        if guide_sets:
+            g_summary, g_flags = guidelines.assess(v, guide_sets, guide_eco)
+            g_summary.to_excel(xl, sheet_name='Guidelines', index=False)
+            g_flags.to_excel(xl, sheet_name='Guidelines by sample', index=False)
     st.download_button('Download results (.xlsx)', buf.getvalue(), file_name='hydrochem_workbench_results.xlsx',
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     st.caption('Every derived variable, saturation index and flag, plus the settings used, so the '

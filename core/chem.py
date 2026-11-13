@@ -33,6 +33,8 @@ ANALYTES = {
     'Cl':   (35.453,  -1, 'Cl'),
     'SO4':  (96.06,   -2, 'S(6)'),
     'NO3':  (62.004,  -1, 'N(5)'),
+    'NH4':  (18.039,  +1, 'Amm'),
+    'PO4':  (94.971,   0, 'P'),       # charge left out of the balance (pH dependent, small)
     'Br':   (79.904,  -1, 'Br'),
     'F':    (18.998,  -1, 'F'),
     'SiO2': (60.084,   0, 'Si'),
@@ -50,19 +52,24 @@ ID_COLS = ['Sample', 'Label']
 FIELD_COLS = ['pH', 'Temp', 'EC', 'TDS']
 # alkalinity as reported by most labs, always in mg/L as CaCO3
 ALK_COLS = ['Total_Alk_CaCO3', 'Bicarb_Alk_CaCO3', 'Carb_Alk_CaCO3']
+# dissolved inorganic carbon, used when there is no alkalinity
+DIC_COL = 'DIC'
 STYLE_COLS = ['Color', 'Marker']
 # HCO3 and CO3 are not in the template. They are calculated by PHREEQC from
 # alkalinity and pH
 _ions = [a for a in ANALYTES if a not in ('HCO3', 'CO3')]
 _k = _ions.index('Cl')
-TEMPLATE_COLS = ID_COLS + FIELD_COLS + _ions[:_k] + ALK_COLS + _ions[_k:] + STYLE_COLS
+TEMPLATE_COLS = ID_COLS + FIELD_COLS + _ions[:_k] + ALK_COLS + [DIC_COL] + _ions[_k:] + STYLE_COLS
 
 UNITS = ['mg/L', 'mmol/L', 'meq/L']
 
 # mg/L as CaCO3 per meq/L of alkalinity (100.087 / 2)
 CACO3_PER_MEQ = 50.0435
-# NO3-N -> NO3 (62.004 / 14.007)
-N_TO_NO3 = 4.4267
+# as N or as P -> the ion
+N_TO_NO3 = 4.4267    # 62.004 / 14.007
+N_TO_NH4 = 1.2879    # 18.039 / 14.007
+P_TO_PO4 = 3.0662    # 94.971 / 30.974
+MW_N, MW_P, MW_C, MW_NH3 = 14.007, 30.974, 12.011, 17.031
 
 # seawater in mg/L (Hem, 1985). Only used for reference lines
 SEAWATER_MGL = {'Cl': 19350, 'Na': 10760, 'SO4': 2710, 'Mg': 1290, 'Ca': 411,
@@ -84,6 +91,7 @@ MINERALS = {
     'Barite':       ['Ba', 'SO4'],
     'Celestite':    ['Sr', 'SO4'],
     'Strontianite': ['Sr', 'HCO3'],
+    'Hydroxyapatite': ['Ca', 'PO4'],
 }
 
 # warn above this ionic strength (phreeqc.dat is not for saline water, seawater ~0.7)
@@ -97,8 +105,8 @@ def template_bytes():
     notes = pd.DataFrame({'Column': [
         'Sample', 'Label', 'pH', 'Temp', 'EC', 'TDS',
         'Ca, Mg, Na, K, Cl, SO4 ...',
-        'ALKALINITY', 'Total_Alk_CaCO3', 'Bicarb_Alk_CaCO3', 'Carb_Alk_CaCO3', '',
-        'NO3', 'SiO2', 'Color', 'Marker',
+        'ALKALINITY', 'Total_Alk_CaCO3', 'Bicarb_Alk_CaCO3', 'Carb_Alk_CaCO3', 'DIC', '',
+        'NO3, NH4', 'PO4', 'SiO2', 'Color', 'Marker',
         '(any other column)', '', 'Units', 'Blank cells', 'Below detection'],
         'What goes in it': [
             'Unique sample name. Required.',
@@ -112,8 +120,10 @@ def template_bytes():
             'Total alkalinity, mg/L as CaCO3. Use this column if the report gives it.',
             'Bicarbonate alkalinity, mg/L as CaCO3. Use this (with the next column) if the report has no total.',
             'Carbonate alkalinity, mg/L as CaCO3. Often below detection: leave blank.',
-            'If total alkalinity is filled it is used. Otherwise bicarbonate + carbonate alkalinity is used. These columns are always mg/L as CaCO3, whatever unit is chosen for the ions.',
-            'Nitrate as NO3, or as N (tell the app which).',
+            'Dissolved inorganic carbon, for samples with no alkalinity. mg/L as C or mmol/L (tell the app which). PHREEQC calculates HCO3 and CO3 from DIC and pH.',
+            'If total alkalinity is filled it is used. Otherwise bicarbonate + carbonate alkalinity, otherwise DIC. The alkalinity columns are always mg/L as CaCO3, whatever unit is chosen for the ions.',
+            'Nitrate and ammonium (total ammonia), as the ion or as N (tell the app which). Lab reports usually give NO3-N and NH3-N, i.e. as N.',
+            'Phosphate (filterable reactive phosphorus), as PO4 or as P (tell the app which).',
             'Silica as SiO2. Neutral, so if the unit is meq/L enter it in mmol/L.',
             'Optional matplotlib colour for this row (e.g. #0089d0). Blank = automatic by Label.',
             'Optional matplotlib marker for this row (e.g. o, s, ^, D). Blank = automatic by Label.',
@@ -177,6 +187,14 @@ def example_data():
     sand = df['Label'].str.startswith('Sandstone')
     df.loc[~sand, 'Total_Alk_CaCO3'] = alk[~sand]
     df.loc[sand, 'Bicarb_Alk_CaCO3'] = alk[sand]
+    # one sample with DIC and no alkalinity
+    df[DIC_COL] = np.nan
+    df.loc[7, DIC_COL] = round(df.loc[7, 'HCO3'] / ANALYTES['HCO3'][0] * MW_C * 1.08, 1)
+    df.loc[7, ALK_COLS] = np.nan
+    # nutrients (as the ion), with one high nitrate
+    df['NH4'] = rng.uniform(0.01, 0.12, len(df)).round(3)
+    df['PO4'] = rng.uniform(0.005, 0.06, len(df)).round(3)
+    df.loc[12, 'NO3'] = 62.0
     df['Color'] = ''
     df['Marker'] = ''
     return df[TEMPLATE_COLS]
@@ -204,8 +222,8 @@ def clean(raw):
         problems.append('There is no "Sample" column. Use the template.')
         return df, pd.DataFrame(), [], problems
     missing_majors = [c for c in MAJORS if c not in df.columns and c not in ('HCO3', 'CO3')]
-    if not any(c in df.columns for c in ['HCO3'] + ALK_COLS):
-        missing_majors.append('alkalinity (Total_Alk_CaCO3 or Bicarb_Alk_CaCO3)')
+    if not any(c in df.columns for c in ['HCO3', DIC_COL] + ALK_COLS):
+        missing_majors.append('alkalinity (Total_Alk_CaCO3 or Bicarb_Alk_CaCO3) or DIC')
     if missing_majors:
         problems.append('Missing major-ion columns: ' + ', '.join(missing_majors))
         return df, pd.DataFrame(), [], problems
@@ -219,7 +237,7 @@ def clean(raw):
         if c not in df.columns:
             df[c] = ''
         df[c] = df[c].fillna('').astype(str).str.strip()
-    for c in FIELD_COLS + ALK_COLS + list(ANALYTES):
+    for c in FIELD_COLS + ALK_COLS + [DIC_COL] + list(ANALYTES):
         if c not in df.columns:
             df[c] = np.nan
 
@@ -235,7 +253,7 @@ def clean(raw):
             continue
         num = pd.to_numeric(df[c], errors='coerce')
         bad = num.isna() & df[c].notna() & (df[c].astype(str).str.strip() != '')
-        known = c in FIELD_COLS or c in ALK_COLS or c in ANALYTES
+        known = c in FIELD_COLS or c in ALK_COLS or c == DIC_COL or c in ANALYTES
         if known:
             for i in df.index[bad]:
                 dropped.append({'Sample': df.at[i, 'Sample'], 'Column': c,
@@ -250,7 +268,7 @@ def clean(raw):
             extra_cols.append(c)
 
     # negative concentrations are dropped too
-    for c in list(ANALYTES) + ALK_COLS:
+    for c in list(ANALYTES) + ALK_COLS + [DIC_COL]:
         neg = df[c] < 0
         for i in df.index[neg]:
             dropped.append({'Sample': df.at[i, 'Sample'], 'Column': c,
@@ -261,7 +279,7 @@ def clean(raw):
 
 
 # %% units
-def to_mmol(df, unit, no3_as_n=False):
+def to_mmol(df, unit, n_as_n=False, p_as_p=False, dic_unit='mg/L as C'):
     # ions to mmol/L and alkalinity to meq/L (mmol['Alk'])
     # returns (mmol, where the alkalinity came from for each sample)
     mmol = pd.DataFrame(index=df.index)
@@ -295,8 +313,20 @@ def to_mmol(df, unit, no3_as_n=False):
     mmol['HCO3'] = np.nan
     mmol['CO3'] = np.nan
 
-    if no3_as_n and unit == 'mg/L':
-        mmol['NO3'] = df['NO3'].astype(float) * N_TO_NO3 / ANALYTES['NO3'][0]
+    # DIC is only used where there is no alkalinity
+    dic = df[DIC_COL].astype(float)
+    mmol['DIC'] = dic / MW_C if dic_unit == 'mg/L as C' else dic
+    use_d = mmol['Alk'].isna() & mmol['DIC'].notna()
+    source[use_d] = 'DIC'
+    mmol.loc[~use_d, 'DIC'] = np.nan
+
+    # as N / as P only changes anything for mg/L (a mole of NO3-N is a mole of NO3)
+    if unit == 'mg/L':
+        if n_as_n:
+            mmol['NO3'] = df['NO3'].astype(float) / MW_N
+            mmol['NH4'] = df['NH4'].astype(float) / MW_N
+        if p_as_p:
+            mmol['PO4'] = df['PO4'].astype(float) / MW_P
     return mmol, source
 
 
@@ -323,7 +353,7 @@ def fill_missing(df, mmol, rules):
     how, val = rules['HCO3']
     val = val / CACO3_PER_MEQ
     has_other = mmol[['Ca', 'Mg', 'Na', 'Cl']].notna().any(axis=1)
-    gap = mmol['Alk'].isna() & has_other
+    gap = mmol['Alk'].isna() & mmol['DIC'].isna() & has_other
     if gap.any():
         if how == 'balance':
             cat = sum(mmol[a].fillna(0) * ANALYTES[a][1] for a in CATIONS)
@@ -343,14 +373,14 @@ def fill_missing(df, mmol, rules):
 
 # %% PHREEQC
 def run_phreeqc(df, mmol, pp):
-    # run each sample through phreeqc.dat with alkalinity and pH as inputs.
+    # run each sample through phreeqc.dat with pH and alkalinity (or DIC) as inputs.
     # HCO3 and CO3 come back from the speciation and are written into mmol:
     #   HCO3 = HCO3- plus its ion pairs (CaHCO3+, MgHCO3+, NaHCO3 ...)
     #   CO3  = CO3-2 plus its ion pairs (CaCO3, MgCO3, NaCO3- ...)
     # so HCO3 + 2*CO3 is the carbonate alkalinity
     mmol = mmol.copy()
     out = pd.DataFrame(index=df.index, dtype=float)
-    cols = ['SI ' + m for m in MINERALS] + ['log pCO2', 'Ionic strength (mol/kgw)',
+    cols = ['SI ' + m for m in MINERALS] + ['log pCO2', 'DIC (mmol/L)', 'Ionic strength (mol/kgw)',
                                             'SC calc (uS/cm)']
     for c in cols:
         out[c] = np.nan
@@ -359,6 +389,7 @@ def run_phreeqc(df, mmol, pp):
     for i in df.index:
         row = mmol.loc[i]
         alk = row['Alk'] if pd.notna(row['Alk']) else 0.0
+        dic = row['DIC'] if pd.notna(row['DIC']) else 0.0
         if pd.isna(df.at[i, 'pH']) or row[['Ca', 'Mg', 'Na', 'Cl']].isna().all():
             continue
         sol = {'units': 'mmol/l', 'pH': float(df.at[i, 'pH']),
@@ -368,26 +399,35 @@ def run_phreeqc(df, mmol, pp):
                 sol[key] = float(row[a])
         if alk > 0:
             sol['Alkalinity'] = float(alk)
+        elif dic > 0:
+            sol['C(4)'] = float(dic)
 
         try:
             s = pp.add_solution(sol)
         except Exception as exc:   # did not converge
             errors.append({'Sample': df.at[i, 'Sample'], 'Error': str(exc)[:200]})
             # fall back to all alkalinity as HCO3 so the sample still plots
-            if alk > 0:
-                mmol.at[i, 'HCO3'] = alk
+            if alk > 0 or dic > 0:
+                mmol.at[i, 'HCO3'] = alk if alk > 0 else dic
                 mmol.at[i, 'CO3'] = 0.0
             continue
 
-        if alk > 0:
+        if alk > 0 or dic > 0:
             moles = s.species_moles
             # per kg of water, the same basis PHREEQC used for the inputs
             per_l = 1000.0 / s.mass
-            mmol.at[i, 'HCO3'] = sum(m for k, m in moles.items() if 'HCO3' in k) * per_l
-            mmol.at[i, 'CO3'] = sum(m for k, m in moles.items() if 'CO3' in k and 'HCO3' not in k) * per_l
+            hco3 = sum(m for k, m in moles.items() if 'HCO3' in k) * per_l
+            co3 = sum(m for k, m in moles.items() if 'CO3' in k and 'HCO3' not in k) * per_l
+            co2 = sum(m * (2 if k == '(CO2)2' else 1) for k, m in moles.items() if 'CO2' in k) * per_l
+            mmol.at[i, 'HCO3'] = hco3
+            mmol.at[i, 'CO3'] = co3
+            out.at[i, 'DIC (mmol/L)'] = hco3 + co3 + co2
             out.at[i, 'log pCO2'] = s.si('CO2(g)')
+            if alk <= 0:
+                # DIC sample: report the carbonate alkalinity that goes with it
+                mmol.at[i, 'Alk'] = hco3 + 2 * co3
         for m, needs in MINERALS.items():
-            have = [alk if n == 'HCO3' else row[n] for n in needs]
+            have = [max(alk, dic) if n == 'HCO3' else row[n] for n in needs]
             if all(pd.notna(x) and x > 0 for x in have):
                 si = s.si(m)
                 out.at[i, 'SI ' + m] = si if si > -99 else np.nan
@@ -464,6 +504,12 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
     for a in ANALYTES:
         v[f'{a} (mg/L)'] = mgl[a]
 
+    # forms used by the water quality guidelines
+    v['NO3-N (mg/L)'] = mmol['NO3'] * MW_N
+    v['NH4-N (mg/L)'] = mmol['NH4'] * MW_N
+    v['Ammonia as NH3 (mg/L)'] = mmol['NH4'] * MW_NH3
+    v['PO4-P (mg/L)'] = mmol['PO4'] * MW_P
+    v['Hardness (mg/L as CaCO3)'] = (mmol['Ca'] + mmol['Mg'].fillna(0)) * 100.087
     v['Alkalinity (meq/L)'] = mmol['Alk']
     v['Alkalinity (mg/L as CaCO3)'] = mmol['Alk'] * CACO3_PER_MEQ
 
@@ -547,7 +593,7 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
 
 # %% hollow markers
 _HCO3_DEPENDENT = {'CBE (%)', 'Sum anions (meq/L)', 'TDS calc (mg/L)'}
-_PHREEQC_EXTRA = {'log pCO2', 'Ionic strength (mol/kgw)', 'SC calc (uS/cm)'}
+_PHREEQC_EXTRA = {'log pCO2', 'DIC (mmol/L)', 'Ionic strength (mol/kgw)', 'SC calc (uS/cm)'}
 
 
 def hollow_mask(v, cols):

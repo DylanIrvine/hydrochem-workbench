@@ -38,13 +38,16 @@ def test_units_agree():
 def test_alkalinity_columns_and_nitrate_as_n():
     # 100 mg/L as CaCO3 = 2 meq/L, entered as total or as bicarbonate + carbonate
     base = dict(pH=7.5, Temp=25, Ca=40, Mg=1, Na=1, K=1, Cl=1, SO4=1)
-    a, _ = run(one_sample(Total_Alk_CaCO3=100, NO3=10, **base), 'mg/L', no3_as_n=True)
+    a, _ = run(one_sample(Total_Alk_CaCO3=100, NO3=10, NH4=1, PO4=1, **base), 'mg/L', n_as_n=True, p_as_p=True)
     b, _ = run(one_sample(Bicarb_Alk_CaCO3=80, Carb_Alk_CaCO3=20, **base), 'mg/L')
     for t in (a, b):
         assert t.at[0, 'Alkalinity (meq/L)'] == pytest.approx(1.998, rel=1e-3)
     assert a.at[0, 'Alkalinity from'] == 'Total alkalinity'
     assert b.at[0, 'Alkalinity from'] == 'Bicarbonate + carbonate alkalinity'
     assert a.at[0, 'NO3 (mg/L)'] == pytest.approx(44.27, rel=1e-3)
+    assert a.at[0, 'NO3-N (mg/L)'] == pytest.approx(10.0, rel=1e-6)
+    assert a.at[0, 'NH4 (mg/L)'] == pytest.approx(1.288, rel=1e-3)
+    assert a.at[0, 'PO4 (mg/L)'] == pytest.approx(3.066, rel=1e-3)
     # the alkalinity columns are mg/L as CaCO3 even when the ions are in meq/L
     c, _ = run(one_sample(pH=7.5, Temp=25, Ca=2, Mg=0.1, Na=0.1, K=0.1, Cl=0.1, SO4=0.1,
                           Total_Alk_CaCO3=100), 'meq/L')
@@ -141,3 +144,43 @@ def test_extra_numeric_column_is_plottable():
     raw['d18O'] = -6.2
     t, _ = run(raw)
     assert 'd18O' in chem.plottable(t)
+
+
+def test_dic_gives_the_same_answer_as_alkalinity():
+    # speciate with alkalinity, read off the DIC, feed that back in as DIC
+    base = dict(pH=7.4, Temp=25, Ca=40, Mg=10, Na=20, K=2, Cl=25, SO4=15)
+    a, _ = run(one_sample(Total_Alk_CaCO3=150, **base))
+    dic_mgC = a.at[0, 'DIC (mmol/L)'] * 12.011
+    b, _ = run(one_sample(DIC=dic_mgC, **base))
+    c, _ = run(one_sample(DIC=a.at[0, 'DIC (mmol/L)'], **base), dic_unit='mmol/L')
+    for t in (b, c):
+        assert t.at[0, 'Alkalinity from'] == 'DIC'
+        assert t.at[0, 'HCO3 (mmol/L)'] == pytest.approx(a.at[0, 'HCO3 (mmol/L)'], rel=2e-3)
+        assert t.at[0, 'SI Calcite'] == pytest.approx(a.at[0, 'SI Calcite'], abs=0.01)
+        assert t.at[0, 'Filled'] == ''
+
+
+def test_guidelines():
+    from core import guidelines
+    raw = pd.concat([
+        one_sample(Sample='ok', pH=7.2, Temp=25, Ca=20, Mg=5, Na=30, K=2, Cl=40, SO4=20, Total_Alk_CaCO3=60,
+                   NO3=5, F=0.3, Mn=0.01, Fe=0.05),
+        one_sample(Sample='bad', pH=9.0, Temp=25, Ca=150, Mg=60, Na=400, K=10, Cl=700, SO4=300,
+                   Total_Alk_CaCO3=200, NO3=80, F=2.0, Mn=0.2, Fe=1.0),
+        # soft water: 2 mg/L NO3-N is over the 1.1 soft-water value but not the hard-water one
+        one_sample(Sample='soft', pH=7.0, Temp=25, Ca=4, Mg=1, Na=5, K=1, Cl=5, SO4=2, Total_Alk_CaCO3=10,
+                   NO3=8.85),
+    ], ignore_index=True)
+    t, _ = run(raw)
+    summary, flags = guidelines.assess(t, guidelines.set_names(), 'Lowland river')
+    by = lambda name, s: summary[(summary['Parameter'] == name) & summary['Guideline set'].str.startswith(s)].iloc[0]
+    assert by('Nitrate (as NO3)', 'Drinking water: health')['Which samples'] == 'bad'
+    assert by('Fluoride', 'Drinking water: health')['Which samples'] == 'bad'
+    assert by('Manganese', 'Drinking water: health')['Guideline value'] == '0.1'
+    assert by('pH', 'Drinking water: aesthetic')['Which samples'] == 'bad'
+    assert by('Total dissolved solids', 'Drinking water: aesthetic')['Which samples'] == 'bad'
+    assert by('Nitrate (as N), soft water', 'Aquatic')['Which samples'] == 'soft'
+    assert by('Nitrate (as N), hard water', 'Aquatic')['Samples assessed'] == 1
+    assert by('Nitrate (as N), hard water', 'Aquatic')['Outside guideline'] == 0
+    assert flags.set_index('Sample').at['ok', 'Count'] <= 2      # only the tropical nutrient values
+    assert 'Fluoride' in flags.set_index('Sample').at['bad', 'Outside guideline for']
