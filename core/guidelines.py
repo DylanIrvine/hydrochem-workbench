@@ -19,7 +19,6 @@ import pandas as pd
 ADWG = 'NHMRC, Australian Drinking Water Guidelines, Table 10.6 (online version, checked Nov 2026)'
 ANZECC = 'ANZECC & ARMCANZ (2000), Table 3.4.1'
 ANZG_NO3 = 'ANZG (2025) technical brief: nitrate in freshwater'
-TROP = 'ANZECC & ARMCANZ (2000), Tables 3.3.4 and 3.3.5 (tropical Australia)'
 
 # %% drinking water and toxicants
 # kind: 'max' (flag above value), 'range' (flag outside low-high)
@@ -46,7 +45,7 @@ SETS = {
         dict(var='SiO2 (mg/L)', name='Silica', kind='max', value=80, source=ADWG),
         dict(var='Ammonia as NH3 (mg/L)', name='Ammonia (as NH3)', kind='max', value=0.5, source=ADWG),
     ],
-    'Aquatic ecosystems: freshwater toxicants, 95% protection (ANZG)': [
+    'Aquatic ecosystems: freshwater, toxicants at 95% protection (ANZG)': [
         dict(var='NO3-N (mg/L)', name='Nitrate (as N), soft water', kind='max', value=1.1, hard=(0, 30),
              source=ANZG_NO3, note='Hardness below 30 mg/L as CaCO3.'),
         dict(var='NO3-N (mg/L)', name='Nitrate (as N), moderately hard water', kind='max', value=2.6,
@@ -57,7 +56,7 @@ SETS = {
              note='Value is for pH 8. The guideline is lower above pH 8 and higher below it; not adjusted here.'),
         dict(var='Mn (mg/L)', name='Manganese', kind='max', value=1.9, source=ANZECC),
     ],
-    'Aquatic ecosystems: marine toxicants, 95% protection (ANZG)': [
+    'Aquatic ecosystems: marine, toxicants at 95% protection (ANZG)': [
         dict(var='NH4-N (mg/L)', name='Total ammonia (as N)', kind='max', value=0.91, source=ANZECC,
              note='Value is for pH 8.'),
         dict(var='Mn (mg/L)', name='Manganese', kind='max', value=0.08, source=ANZECC,
@@ -65,28 +64,62 @@ SETS = {
     ],
 }
 
-# %% physical and chemical stressors, tropical Australia (slightly disturbed ecosystems)
-# nutrients in ug/L in the source, stored here in mg/L. Where the source gives a
-# range (e.g. wetlands FRP 5-25) the upper end is used
+# %% physical and chemical stressors by region (slightly disturbed ecosystems)
+# ANZECC & ARMCANZ (2000) Tables 3.3.2 to 3.3.9. Nutrients are ug/L in the
+# source and stored here in mg/L. Where the source gives a range (e.g. tropical
+# wetlands FRP 5-25) the upper end is used. None = no value in the source.
+# Estuaries are the nearest thing to a brackish water value.
 # (FRP, NOx, total ammonia N, pH low, pH high, EC low, EC high)
-TROPICAL = {
-    'Upland river':        (0.005, 0.030, 0.006, 6.0, 7.5, 20, 250),
-    'Lowland river':       (0.004, 0.010, 0.010, 6.0, 8.0, 20, 250),
-    'Lakes and reservoirs': (0.005, 0.010, 0.010, 6.0, 8.0, 90, 900),
-    'Wetlands':            (0.025, 0.010, 0.010, 6.0, 8.0, 90, 900),
-    'Estuaries':           (0.005, 0.030, 0.015, 7.0, 8.5, None, None),
-    'Marine, inshore':     (0.005, 0.008, 0.010, 8.0, 8.4, None, None),
-    'Marine, offshore':    (0.005, 0.004, 0.006, 8.2, 8.2, None, None),
+REGIONS = {
+    'Tropical Australia': {
+        'Upland river':         (0.005, 0.030, 0.006, 6.0, 7.5, 20, 250),
+        'Lowland river':        (0.004, 0.010, 0.010, 6.0, 8.0, 20, 250),
+        'Lakes and reservoirs': (0.005, 0.010, 0.010, 6.0, 8.0, 90, 900),
+        'Wetlands':             (0.025, 0.010, 0.010, 6.0, 8.0, 90, 900),
+        'Estuaries':            (0.005, 0.030, 0.015, 7.0, 8.5, None, None),
+        'Marine, inshore':      (0.005, 0.008, 0.010, 8.0, 8.4, None, None),
+        'Marine, offshore':     (0.005, 0.004, 0.006, 8.2, 8.2, None, None),
+    },
+    'South-east Australia': {
+        'Upland river':         (0.015, 0.015, 0.013, 6.5, 7.5, 30, 350),
+        'Lowland river':        (0.020, 0.040, 0.020, 6.5, 8.0, 125, 2200),
+        'Lakes and reservoirs': (0.005, 0.010, 0.010, 6.5, 8.0, 20, 30),
+        'Estuaries':            (0.005, 0.015, 0.015, 7.0, 8.5, None, None),
+        'Marine':               (0.010, 0.005, 0.015, 8.0, 8.4, None, None),
+    },
+    'South-west Australia': {
+        'Upland river':         (0.010, 0.200, 0.060, 6.5, 8.0, 120, 300),
+        'Lowland river':        (0.040, 0.150, 0.080, 6.5, 8.0, 120, 300),
+        'Lakes and reservoirs': (0.005, 0.010, 0.010, 6.5, 8.0, 300, 1500),
+        'Wetlands':             (0.030, 0.100, 0.040, 7.0, 8.5, 300, 1500),
+        'Estuaries':            (0.005, 0.045, 0.040, 7.5, 8.5, None, None),
+        'Marine, inshore':      (0.005, 0.005, 0.005, 8.0, 8.4, None, None),
+        'Marine, offshore':     (0.005, 0.005, 0.005, 8.2, 8.2, None, None),
+    },
+    'South central Australia (low rainfall)': {
+        'Lowland river':        (0.040, 0.100, 0.100, 6.5, 9.0, 100, 5000),
+        'Lakes and reservoirs': (0.010, 0.100, 0.025, 6.5, 9.0, 300, 1000),
+        'Estuaries':            (0.010, 0.100, 0.050, 6.5, 9.0, None, None),
+        'Marine':               (0.010, 0.050, 0.050, 8.0, 8.5, None, None),
+    },
 }
-TROPICAL_NAME = 'Aquatic ecosystems: nutrients, pH and EC, tropical Australia (ANZECC 2000)'
+# state and local exceptions noted in the source tables
+REGION_NOTES = {
+    'Tropical Australia': 'NT value for NOx in lowland rivers and lakes is 0.005 mg/L. No data for tropical WA rivers and estuaries.',
+    'South-east Australia': 'State exceptions apply (e.g. NSW lowland river pH 6.5 to 8.5; Qld river NOx 0.060; Tasmanian river NOx 0.190).',
+    'South-west Australia': 'Highly coloured wetlands have pH 4.5 to 6.5.',
+    'South central Australia (low rainfall)': 'No values for upland rivers or wetlands.',
+}
+REGIONAL_NAME = 'Aquatic ecosystems: nutrients, pH and EC by region (ANZECC 2000)'
+TROP = 'ANZECC & ARMCANZ (2000), Tables 3.3.2 to 3.3.9'
 
 
-def tropical_rows(ecosystem):
-    frp, nox, nh4, ph_lo, ph_hi, ec_lo, ec_hi = TROPICAL[ecosystem]
+def regional_rows(region, ecosystem):
+    frp, nox, nh4, ph_lo, ph_hi, ec_lo, ec_hi = REGIONS[region][ecosystem]
     rows = [
         dict(var='PO4-P (mg/L)', name='Filterable reactive P', kind='max', value=frp, source=TROP),
         dict(var='NO3-N (mg/L)', name='Oxidised N (NOx), from nitrate', kind='max', value=nox, source=TROP,
-             note='Nitrate only: nitrite is not in the template. NT value for lowland rivers and lakes is 0.005.'),
+             note='Nitrate only: nitrite is not in the template. ' + REGION_NOTES[region]),
         dict(var='NH4-N (mg/L)', name='Total ammonia (as N)', kind='max', value=nh4, source=TROP),
         dict(var='pH', name='pH', kind='range', low=ph_lo, high=ph_hi, source=TROP),
     ]
@@ -96,11 +129,11 @@ def tropical_rows(ecosystem):
 
 
 def set_names():
-    return list(SETS) + [TROPICAL_NAME]
+    return list(SETS) + [REGIONAL_NAME]
 
 
 # %% comparison
-def assess(v, chosen, ecosystem='Lowland river'):
+def assess(v, chosen, region='Tropical Australia', ecosystem='Lowland river'):
     # returns (summary, flags)
     #   summary: one row per guideline value, with how many samples exceed it
     #   flags:   one row per sample, text listing what it exceeds
@@ -108,8 +141,8 @@ def assess(v, chosen, ecosystem='Lowland river'):
     summary = []
     per_sample = {i: [] for i in v.index}
     for set_name in chosen:
-        rows = tropical_rows(ecosystem) if set_name == TROPICAL_NAME else SETS[set_name]
-        short = set_name.split(':')[0] + (' (' + ecosystem + ')' if set_name == TROPICAL_NAME else '')
+        rows = regional_rows(region, ecosystem) if set_name == REGIONAL_NAME else SETS[set_name]
+        label = set_name + (f' [{region}, {ecosystem}]' if set_name == REGIONAL_NAME else '')
         for g in rows:
             if g['var'] not in v.columns:
                 continue
@@ -123,7 +156,7 @@ def assess(v, chosen, ecosystem='Lowland river'):
             else:
                 over = applies & ((x < g['low']) | (x > g['high']))
                 limit = f"{g['low']:g} to {g['high']:g}"
-            summary.append({'Guideline set': set_name, 'Parameter': g['name'], 'Guideline value': limit,
+            summary.append({'Guideline set': label, 'Parameter': g['name'], 'Guideline value': limit,
                             'Samples assessed': int(applies.sum()), 'Outside guideline': int(over.sum()),
                             'Which samples': ', '.join(v.loc[over, 'Sample'].astype(str)),
                             'Note': g.get('note', ''), 'Source': g['source']})

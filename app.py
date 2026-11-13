@@ -31,7 +31,7 @@ from core.usage import increment as _record_use, status as _usage_status
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.5'
+APP_VERSION = '0.6'
 PANELS_PER_PAGE = 6
 DEFAULT_PH = 7.0
 DEFAULT_TEMP = 25.0
@@ -352,19 +352,29 @@ if view == 'Data and checks':
         st.dataframe(errors, hide_index=True)
 
 # %% view: guidelines
-GUIDE_DEFAULT = ['Drinking water: health (ADWG)', 'Drinking water: aesthetic (ADWG)']
+GUIDE_DEFAULT = guidelines.set_names()[:3] + [guidelines.REGIONAL_NAME]
 guide_sets = st.session_state.get('guide_sets', GUIDE_DEFAULT)
+guide_region = st.session_state.get('guide_region', 'Tropical Australia')
 guide_eco = st.session_state.get('guide_eco', 'Lowland river')
+if guide_eco not in guidelines.REGIONS[guide_region]:
+    guide_eco = list(guidelines.REGIONS[guide_region])[0]
 if view == 'Guidelines':
     st.subheader('Comparison with Australian water quality guidelines')
+    st.write('Drinking water guidelines and environmental (aquatic ecosystem) guidelines for fresh, '
+             'estuarine and marine waters. Choose the sets that suit the water body.')
     guide_sets = st.multiselect('Guideline sets', guidelines.set_names(), default=guide_sets, key='guide_sets')
-    if guidelines.TROPICAL_NAME in guide_sets:
-        guide_eco = st.selectbox('Ecosystem type (tropical Australia)', list(guidelines.TROPICAL),
-                                 index=list(guidelines.TROPICAL).index(guide_eco), key='guide_eco')
+    if guidelines.REGIONAL_NAME in guide_sets:
+        c1, c2 = st.columns(2)
+        guide_region = c1.selectbox('Region', list(guidelines.REGIONS),
+                                    index=list(guidelines.REGIONS).index(guide_region), key='guide_region')
+        ecos = list(guidelines.REGIONS[guide_region])
+        guide_eco = c2.selectbox('Ecosystem type', ecos,
+                                 index=ecos.index(guide_eco) if guide_eco in ecos else 0, key='guide_eco',
+                                 help='Estuaries are the nearest match for brackish water.')
     if not guide_sets:
         st.info('Choose at least one guideline set.')
     else:
-        g_summary, g_flags = guidelines.assess(v, guide_sets, guide_eco)
+        g_summary, g_flags = guidelines.assess(v, guide_sets, guide_region, guide_eco)
         c1, c2 = st.columns(2)
         c1.metric('Samples outside at least one value', f"{int((g_flags['Count'] > 0).sum())} of {len(g_flags)}")
         c2.metric('Guideline values checked', len(g_summary))
@@ -376,12 +386,14 @@ if view == 'Guidelines':
         st.dataframe(g_flags[g_flags['Count'] > 0], use_container_width=True, hide_index=True)
     st.caption(
         'This is a screening comparison of single samples, not a compliance assessment. '
-        'Fresh or marine is your choice: pick the set that matches the water body. '
-        'The ANZG aquatic ecosystem values were derived for fresh and marine surface waters, not for '
-        'groundwater or for brackish or hypersaline water, and are meant to be compared with the '
-        'median of monitoring data, with site-specific values preferred where they exist. '
+        'Fresh, estuarine or marine is your choice: pick the sets, region and ecosystem type that match '
+        'the water body. There are no national default values for brackish water as such; the estuary '
+        'values are the nearest match. '
+        'The aquatic ecosystem values were derived for surface waters, not for groundwater or for '
+        'brackish or hypersaline water, and are meant to be compared with the median of monitoring '
+        'data, with state or site-specific values taking precedence where they exist. '
+        'Where the source gives a range, the upper end is used. '
         'Total N and total P are not in the template, so those guideline values are not checked. '
-        'The physical and chemical stressor values are included for tropical Australia only. '
         'Guideline values are revised from time to time: check the current source before relying on them.')
 
 # %% view: Piper
@@ -475,7 +487,7 @@ if view == 'Export':
         if n_dropped:
             dropped.astype(str).to_excel(xl, sheet_name='Cells treated as missing', index=False)
         if guide_sets:
-            g_summary, g_flags = guidelines.assess(v, guide_sets, guide_eco)
+            g_summary, g_flags = guidelines.assess(v, guide_sets, guide_region, guide_eco)
             g_summary.to_excel(xl, sheet_name='Guidelines', index=False)
             g_flags.to_excel(xl, sheet_name='Guidelines by sample', index=False)
     st.download_button('Download results (.xlsx)', buf.getvalue(), file_name='hydrochem_workbench_results.xlsx',

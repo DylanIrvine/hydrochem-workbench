@@ -172,7 +172,7 @@ def test_guidelines():
                    NO3=8.85),
     ], ignore_index=True)
     t, _ = run(raw)
-    summary, flags = guidelines.assess(t, guidelines.set_names(), 'Lowland river')
+    summary, flags = guidelines.assess(t, guidelines.set_names(), 'Tropical Australia', 'Lowland river')
     by = lambda name, s: summary[(summary['Parameter'] == name) & summary['Guideline set'].str.startswith(s)].iloc[0]
     assert by('Nitrate (as NO3)', 'Drinking water: health')['Which samples'] == 'bad'
     assert by('Fluoride', 'Drinking water: health')['Which samples'] == 'bad'
@@ -183,4 +183,11 @@ def test_guidelines():
     assert by('Nitrate (as N), hard water', 'Aquatic')['Samples assessed'] == 1
     assert by('Nitrate (as N), hard water', 'Aquatic')['Outside guideline'] == 0
     assert flags.set_index('Sample').at['ok', 'Count'] <= 2      # only the tropical nutrient values
+    # every region and ecosystem type runs, and the values differ between regions
+    for region, ecos in guidelines.REGIONS.items():
+        for eco in ecos:
+            guidelines.assess(t, [guidelines.REGIONAL_NAME], region, eco)
+    se, _ = guidelines.assess(t, [guidelines.REGIONAL_NAME], 'South-east Australia', 'Lowland river')
+    assert se.set_index('Parameter').at['EC (uS/cm)', 'Guideline value'] == '125 to 2200'
+    assert se.set_index('Parameter').at['Filterable reactive P', 'Guideline value'] == '0.02'
     assert 'Fluoride' in flags.set_index('Sample').at['bad', 'Outside guideline for']

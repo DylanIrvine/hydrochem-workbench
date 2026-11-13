@@ -36,7 +36,8 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
 4. **Guidelines.** Each sample is compared with Australian guideline values:
    drinking water (ADWG health and aesthetic), ANZG toxicant default guideline
    values for fresh and marine ecosystems (95% protection), and the ANZECC 2000
-   nutrient, pH and EC values for tropical Australia by ecosystem type. All the
+   nutrient, pH and EC values by region (tropical, south-east, south-west and
+   south central Australia) and ecosystem type, including estuaries. All the
    numbers are in `core/guidelines.py` with their sources. It is a screening
    comparison, not a compliance assessment.
 5. **Plots.**
@@ -87,8 +88,8 @@ usage statistics.
 - No redox: there is no pe/Eh column, so no iron, manganese or sulfide phases.
 - The four WQChartPy diagrams keep WQChartPy's styling, and its Durov has a
   fixed TDS axis (0 to 4000 mg/L).
-- Guideline values for nutrients, pH and EC cover tropical Australia only, and
-  total N and total P are not in the template.
+- Total N and total P are not in the template, so those guideline values are
+  not checked. State and site-specific guideline values are not included.
 - The bundled example data are synthetic.
 
 ## Licence
@@ -102,7 +103,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D. (2026). Hydrochem Workbench (version 0.5) [Web application].
+Irvine, D. (2026). Hydrochem Workbench (version 0.6) [Web application].
 Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).
