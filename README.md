@@ -75,8 +75,10 @@ usage statistics.
     app.py            Streamlit front end
     core/chem.py      template, cleaning, units, fill rules, PHREEQC, derived table
     core/guidelines.py  guideline values and the comparison
+    core/gibbs_fields.py  outline of the Gibbs envelope (from WQChartPy)
     core/plots.py     all figures
     core/usage.py     the usage counter
+    packages.txt      system font for Streamlit Cloud (Liberation Sans)
     logo/             hex badge (svg, png) and favicon
     tests/            pytest: chemistry checks and a headless run of the app
 
@@ -103,7 +105,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D. (2026). Hydrochem Workbench (version 0.6) [Web application].
+Irvine, D. (2026). Hydrochem Workbench (version 0.8.2) [Web application].
 Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).

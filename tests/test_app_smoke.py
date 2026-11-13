@@ -46,3 +46,17 @@ def test_app_runs_on_example_data(tmp_path, monkeypatch):
     assert any(b.label == 'Build a zip of every figure' for b in at.button)
     # should still be 1
     assert any('sessions that have processed data: 1' in c.value for c in at.caption)
+
+
+def test_app_recovers_from_stale_core_modules(tmp_path, monkeypatch):
+    # what Streamlit Cloud did after an update: new app.py, old core modules still in memory
+    import core
+    from core import guidelines
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    monkeypatch.setattr(core, 'VERSION', '0.6')
+    monkeypatch.delattr(guidelines, 'REGIONAL_NAME')
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.checkbox[0].check().run()
+    at.radio[0].set_value('Guidelines').run()
+    assert not at.exception

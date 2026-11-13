@@ -1,5 +1,5 @@
-# Set the deploy Python version to 3.12 or 3.13 (Streamlit Cloud: app settings).
-streamlit>=1.40
+# runs on Python 3.12 to 3.14
+streamlit>=1.50
 numpy>=1.26
 pandas>=2.0
 matplotlib>=3.8

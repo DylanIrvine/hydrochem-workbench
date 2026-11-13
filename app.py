@@ -25,13 +25,25 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from core import chem, guidelines, plots
-from core.usage import increment as _record_use, status as _usage_status
+import core
+from core import chem, guidelines, plots, usage
 
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.6'
+APP_VERSION = '0.8.2'   # keep the same as VERSION in core/__init__.py
+
+# after an update on Streamlit Cloud the server can keep old copies of the core
+# modules in memory while running the new app.py. If the versions do not match,
+# reload them
+if getattr(core, 'VERSION', None) != APP_VERSION:
+    import importlib
+    importlib.reload(core)
+    for _m in (chem, guidelines, plots, usage):
+        importlib.reload(_m)
+
+_record_use, _usage_status = usage.increment, usage.status
+
 PANELS_PER_PAGE = 6
 DEFAULT_PH = 7.0
 DEFAULT_TEMP = 25.0
@@ -231,7 +243,7 @@ def process(raw, unit, n_as_n, p_as_p, dic_unit, rules):
 
 
 def show(fig, name, key):
-    st.pyplot(fig, use_container_width=True)
+    st.pyplot(fig, width='stretch')
     st.download_button('Download PNG (600 dpi)', plots.fig_png(fig, dpi=600),
                        file_name=name + '.png', mime='image/png', key=key)
 
@@ -338,7 +350,7 @@ if view == 'Data and checks':
                     'Alkalinity (mg/L as CaCO3)', 'HCO3 (mg/L)', 'CO3 (mg/L)', 'log pCO2',
                     'Ionic strength (mol/kgw)'] + [c for c in v.columns if c.startswith('SI ') and v[c].notna().any()] + ['Filled']
     st.subheader('Summary')
-    st.dataframe(v[summary_cols].round(3), use_container_width=True, hide_index=True)
+    st.dataframe(v[summary_cols].round(3), width='stretch', hide_index=True)
     st.caption('HCO3 and CO3 are calculated by PHREEQC from the alkalinity and pH you supplied '
                '(each includes its ion pairs, so HCO3 + CO3 adds up to the carbonate alkalinity). '
                'CBE is signed: positive means excess cations. TDS is the measured value where '
@@ -381,9 +393,9 @@ if view == 'Guidelines':
         st.markdown('**By guideline value**')
         st.dataframe(g_summary.style.apply(
             lambda r: ['background-color: rgba(255, 75, 75, 0.25)' if r['Outside guideline'] > 0 else ''] * len(r),
-            axis=1), use_container_width=True, hide_index=True)
+            axis=1), width='stretch', hide_index=True)
         st.markdown('**By sample**')
-        st.dataframe(g_flags[g_flags['Count'] > 0], use_container_width=True, hide_index=True)
+        st.dataframe(g_flags[g_flags['Count'] > 0], width='stretch', hide_index=True)
     st.caption(
         'This is a screening comparison of single samples, not a compliance assessment. '
         'Fresh, estuarine or marine is your choice: pick the sets, region and ecosystem type that match '

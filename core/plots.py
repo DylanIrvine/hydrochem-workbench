@@ -26,6 +26,9 @@
 # each time Streamlit reruns (same as HydroSTITCH)
 
 # %%
+import contextlib
+import io
+import logging
 import os
 import tempfile
 
@@ -33,12 +36,14 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.colors as mcolors
+from matplotlib import font_manager
 import matplotlib.text
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FuncFormatter, NullFormatter
+from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
 from core.chem import SEAWATER_MMOL, hollow_mask
+from core import gibbs_fields
 
 CM = 1.0 / 2.54
 
@@ -46,10 +51,15 @@ CM = 1.0 / 2.54
 matplotlib.rcParams['mathtext.default'] = 'regular'
 
 # %% style
-# Arial if available, otherwise Liberation Sans
+# Arial if available, otherwise Liberation Sans (same letter widths, installed
+# on Streamlit Cloud through packages.txt), otherwise the matplotlib default.
+# Picked once here so matplotlib does not log a warning for every label
+_have = {f.name for f in font_manager.fontManager.ttflist}
+FONT = next((f for f in ['Arial', 'Liberation Sans'] if f in _have), 'DejaVu Sans')
+logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
 STYLE = {
     'font.family': 'sans-serif',
-    'font.sans-serif': ['Arial', 'Liberation Sans', 'DejaVu Sans'],
+    'font.sans-serif': [FONT],
     'font.size': 8,
     'axes.labelsize': 8,
     'axes.titlesize': 8,
@@ -65,8 +75,8 @@ STYLE = {
 }
 
 # colours and markers for the groups
-PALETTE = ['#0089d0', '#F37021', '#CC004C', '#7ea070', '#665e8e', '#FCB711',
-           '#00bdd0', '#a88958', '#0055d0', '#7a7c78']
+PALETTE = ['#FCB711', '#F37021', '#CC004C', '#6460AA', '#0089D0', '#0DB14B', '#808080',
+           '#00bdd0', '#a88958', '#0055d0']
 MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X', '<', '>', 'h']
 
 # Piper colours
@@ -74,6 +84,8 @@ PIPER = {'Ca': '#FCB711', 'NaK': '#F37021', 'Mg': '#CC004C',
          'HCO3': '#00bdd0', 'Cl': '#0089d0', 'SO4': '#0055d0',
          'Ca-Cl': '#7ea070', 'Na-HCO3': '#a88958', 'Mg-HCO3': '#665e8e',
          'Na-Cl': '#7a7c78', 'Mixed': '0.9'}
+# how strong the field colours are (0 = white, 1 = solid). Was 0.5 originally
+PIPER_ALPHA = 0.4
 
 # subscripts for axis labels
 _PRETTY = [('HCO3', 'HCO$_3$'), ('SO4', 'SO$_4$'), ('NO3', 'NO$_3$'),
@@ -147,7 +159,7 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
         offset = 0.10
         h = 0.5 * np.tan(np.pi / 3.0)
         t3 = np.tan(np.pi / 3)
-        a = 0.5   # alpha for the fields
+        a = PIPER_ALPHA
 
         fig = Figure(figsize=(16 * CM, 16 * CM), dpi=150)
         ax = fig.add_subplot(111, aspect='equal', frameon=False, xticks=[], yticks=[])
@@ -397,7 +409,8 @@ def wqchartpy_figure(v, kind):
 
     module = importlib.import_module('wqchartpy.' + WQ_DIAGRAMS[kind])
     before = set(plt.get_fignums())
-    with tempfile.TemporaryDirectory() as tmp:
+    # WQChartPy prints a message each time; keep it out of the server log
+    with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
         module.plot(w, unit='mg/L', figname=os.path.join(tmp, 'fig'), figformat='png')
     new = [n for n in plt.get_fignums() if n not in before]
     if not new:
@@ -411,7 +424,7 @@ def wqchartpy_figure(v, kind):
     for t in fig.findobj(matplotlib.text.Text):
         t.set_fontweight('normal')
         t.set_fontstyle('normal')
-        t.set_fontfamily(STYLE['font.sans-serif'])
+        t.set_fontfamily(FONT)
     matplotlib.rcdefaults()
     matplotlib.rcParams['mathtext.default'] = 'regular'
     return fig, note
@@ -598,6 +611,36 @@ def available(v, panel):
     return bool((v[x].notna() & v[y].notna()).any())
 
 
+def _clear_spot(ax, x, y, candidates):
+    # pick the label position furthest from the plotted points
+    # candidates: [(x, y, ha, va), ...] in axes fractions (0 to 1)
+    ok = x.notna() & y.notna()
+    if not ok.any():
+        return candidates[0]
+    pts = ax.transAxes.inverted().transform(ax.transData.transform(np.column_stack([x[ok], y[ok]])))
+    pts = pts[np.isfinite(pts).all(axis=1)]
+    if len(pts) == 0:
+        return candidates[0]
+    best, best_d = candidates[0], -1.0
+    for c in candidates:
+        # the text runs away from its anchor, so test a point a little way into it
+        cx = c[0] + {'left': 0.10, 'right': -0.10, 'center': 0.0}[c[2]]
+        cy = c[1] + {'bottom': 0.04, 'top': -0.04, 'center': 0.0}[c[3]]
+        d = np.min(np.hypot((pts[:, 0] - cx) * 1.6, pts[:, 1] - cy))
+        if d > best_d + 0.02:
+            best, best_d = c, d
+    return best
+
+
+def _gibbs_field(ax, outline):
+    # grey Gibbs envelope (the boomerang), closed along the right-hand axis
+    lower, notch, upper = outline['lower'], outline['notch'], outline['upper']
+    pts = (lower + [(1.0, lower[-1][1]), (1.0, notch[0][1])] + notch +
+           [(1.0, notch[-1][1]), (1.0, upper[0][1])] + upper)
+    xs, ys = zip(*pts)
+    ax.fill(xs, ys, facecolor='0.85', edgecolor='0.4', lw=0.6, ls='--', alpha=0.6, zorder=0)
+
+
 def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
     x, y = v[panel['x']], v[panel['y']]
     xlog = panel.get('xlog', False) or (log_conc and panel.get('conc', False))
@@ -642,19 +685,39 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
                     lim[0], lim[1] = min(lim[0], lo - pad), max(lim[1], hi + pad)
     if panel.get('gibbs', False):
         xl = [0, 1]
-        yl = [min(yl[0], 5), max(yl[1], 50000)]
-        for fx, fy, txt in [(0.97, 0.08, 'Precipitation\ndominance'), (0.03, 0.5, 'Rock\ndominance'),
-                            (0.97, 0.92, 'Evaporation\ndominance')]:
-            ax.text(fx, fy, txt, transform=ax.transAxes, fontsize=6, color='0.35',
-                    ha='right' if fx > 0.5 else 'left', va='center', zorder=2)
+        yl = [1, 100000]
+        ax.set_xlim(xl)
+        ax.set_ylim(yl)
+        _gibbs_field(ax, gibbs_fields.NA_CA if panel['x'].startswith('Na') else gibbs_fields.CL_HCO3)
+        ax.yaxis.set_major_locator(LogLocator(base=10, numticks=12))
+        # each label has a few possible positions; use the one clear of the data
+        for txt, cands in [
+                ('Evaporation\ndominance', [(0.97, 0.96, 'right', 'top'), (0.60, 0.96, 'right', 'top'),
+                                            (0.30, 0.96, 'right', 'top')]),
+                ('Rock\ndominance', [(0.03, 0.47, 'left', 'center'), (0.03, 0.72, 'left', 'center'),
+                                     (0.03, 0.14, 'left', 'center'), (0.30, 0.47, 'left', 'center')]),
+                ('Precipitation\ndominance', [(0.97, 0.04, 'right', 'bottom'), (0.60, 0.04, 'right', 'bottom'),
+                                              (0.30, 0.04, 'right', 'bottom')])]:
+            fx, fy, ha, va = _clear_spot(ax, x, y, cands)
+            ax.text(fx, fy, txt, transform=ax.transAxes, fontsize=6, color='0.25', ha=ha, va=va, zorder=20)
     if 'band' in panel:
         ax.axhspan(panel['band'][0], panel['band'][1], color='0.85', alpha=0.6, lw=0, zorder=0,
                    label=panel['band'][2])
     for bx in panel.get('boxes', []):
         ax.fill([bx[0], bx[1], bx[1], bx[0]], [bx[2], bx[2], bx[3], bx[3]], facecolor='0.85',
                 edgecolor='0.4', lw=0.6, alpha=0.6, zorder=0)
-        mid = np.sqrt(bx[0] * bx[1]) if xlog else 0.5 * (bx[0] + bx[1])
-        ax.text(mid, bx[2], bx[4], fontsize=6, color='0.3', ha='center', va='top', zorder=2)
+        # label beside the box, on whichever side is clear of the data
+        ax.set_xlim(xl)
+        ax.set_ylim(yl)
+        (fx0, fy0), (fx1, fy1) = ax.transAxes.inverted().transform(
+            ax.transData.transform([(bx[0], bx[2]), (bx[1], bx[3])]))
+        fxm, fym = 0.5 * (fx0 + fx1), 0.5 * (fy0 + fy1)
+        cands = [(fxm, fy0 - 0.02, 'center', 'top'), (fxm, fy1 + 0.02, 'center', 'bottom'),
+                 (fx1 + 0.02, fym, 'left', 'center'), (fx0 - 0.02, fym, 'right', 'center')]
+        cands = [c for c in cands if 0.06 < c[1] < 0.94 and (c[2] != 'left' or c[0] < 0.80)
+                 and (c[2] != 'right' or c[0] > 0.20)] or cands[:1]
+        fx, fy, ha, va = _clear_spot(ax, x, y, cands)
+        ax.text(fx, fy, bx[4], transform=ax.transAxes, fontsize=6, color='0.25', ha=ha, va=va, zorder=20)
     xs = np.geomspace(max(xl[0], 1e-12), xl[1], 50) if xlog else np.linspace(xl[0], xl[1], 50)
 
     k = 0
