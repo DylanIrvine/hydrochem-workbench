@@ -1,19 +1,29 @@
+# This file is part of hydrochem-workbench.
+# Copyright (C) 2026 Dylan Irvine
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
+#
+# Portions of this file are adapted from WQChartPy (triangle_piper.py),
+# Copyright (C) the WQChartPy authors (Yang et al., 2022), licensed under
+# GPL-3.0: https://github.com/jyangfsu/WQChartPy
+# Modified 2024 (D. Irvine: coloured fields, water-type labels) and 2026
+# (returns a Figure, grouped drawing, hollow markers for filled inputs).
+
 # core/plots.py
-# All figures. The house style comes from PiperScript.py: 8 pt sans-serif,
-# black-edged markers, ticks straddling the axis, sizes in centimetres.
+# all of the figures
 #
-#   piper()            the coloured trilinear Piper from PiperScript.py
-#   schoeller()        native, house style
-#   stiff()            native, house style, a grid of samples
-#   wqchartpy_figure() Durov, Gibbs, Chadha and HFE-D straight from WQChartPy
-#                      (not yet restyled)
-#   gallery_page()     a page of diagnostic x-y panels with reference lines
-#   custom()           any variable against any other
+#   piper()            Piper diagram
+#   schoeller()        Schoeller
+#   stiff()            Stiff diagrams
+#   wqchartpy_figure() Durov, Gibbs, Chadha, HFE-D from WQChartPy
+#   gallery_page()     x-y panels with reference lines
+#   custom()           user-defined x-y plot
 #
-# Figures are built with Figure() rather than plt.figure(), as in HydroSTITCH:
-# pyplot holds a reference to every figure it makes, and Streamlit redraws on
-# every click. The WQChartPy wrapper is the one exception, because WQChartPy
-# calls pyplot itself; it closes what it opens.
+# nb. uses Figure() and not plt.figure(), otherwise figures pile up in memory
+# each time Streamlit reruns (same as HydroSTITCH)
 
 # %%
 import os
@@ -31,8 +41,7 @@ from core.chem import SEAWATER_MMOL, hollow_mask
 CM = 1.0 / 2.54
 
 # %% style
-# Arial where it exists (Windows, Mac), otherwise the metric-compatible
-# Liberation Sans, otherwise matplotlib's default.
+# Arial if available, otherwise Liberation Sans
 STYLE = {
     'font.family': 'sans-serif',
     'font.sans-serif': ['Arial', 'Liberation Sans', 'DejaVu Sans'],
@@ -50,18 +59,18 @@ STYLE = {
     'mathtext.default': 'regular',
 }
 
-# Group colours and markers, assigned in order of first appearance of Label.
+# colours and markers for the groups
 PALETTE = ['#0089d0', '#F37021', '#CC004C', '#7ea070', '#665e8e', '#FCB711',
            '#00bdd0', '#a88958', '#0055d0', '#7a7c78']
 MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X', '<', '>', 'h']
 
-# Piper field colours, from PiperScript.py
+# Piper colours
 PIPER = {'Ca': '#FCB711', 'NaK': '#F37021', 'Mg': '#CC004C',
          'HCO3': '#00bdd0', 'Cl': '#0089d0', 'SO4': '#0055d0',
          'Ca-Cl': '#7ea070', 'Na-HCO3': '#a88958', 'Mg-HCO3': '#665e8e',
          'Na-Cl': '#7a7c78', 'Mixed': '0.9'}
 
-# Pretty axis labels: subscripts and charges for the common species.
+# subscripts for axis labels
 _PRETTY = [('HCO3', 'HCO$_3$'), ('SO4', 'SO$_4$'), ('NO3', 'NO$_3$'),
            ('CO3', 'CO$_3$'), ('SiO2', 'SiO$_2$'), ('pCO2', 'pCO$_2$')]
 
@@ -74,7 +83,7 @@ def pretty(name):
 
 
 def group_styles(v):
-    """Label -> (colour, marker). A row's own Color/Marker wins if given."""
+    # colour and marker for each Label (Color/Marker columns override)
     styles = {}
     for k, lab in enumerate(pd.unique(v['Label'])):
         rows = v[v['Label'] == lab]
@@ -85,11 +94,8 @@ def group_styles(v):
 
 
 def _scatter(ax, v, x, y, hollow, styles, cvals=None, size=22, legend=True, zorder=10):
-    """Scatter by group. Hollow markers where `hollow` is True.
-
-    With `cvals` (a numeric Series) the fill colour comes from a viridis scale
-    and the marker shape alone carries the group. Returns the mappable or None.
-    """
+    # scatter by group, hollow markers where hollow is True
+    # if cvals is given, colour by that variable instead (viridis)
     mappable = None
     if cvals is not None:
         ok = cvals.notna()
@@ -131,18 +137,12 @@ def _legend_handles(styles, any_hollow):
 
 # %% Piper
 def piper(v, color_by=None, water_legend=False, show_types=True):
-    """Coloured trilinear Piper diagram. Geometry and colours from PiperScript.py,
-    which was adapted from WQChartPy's triangle_piper (Yang et al., 2022).
-
-    Changes from the script: returns a Figure instead of saving; points are
-    drawn by group; samples with a filled HCO3 are hollow; the meq/L branch no
-    longer references an undefined array.
-    """
+    # Piper diagram, adapted from WQChartPy triangle_piper with coloured fields
     with matplotlib.rc_context(STYLE):
         offset = 0.10
         h = 0.5 * np.tan(np.pi / 3.0)
         t3 = np.tan(np.pi / 3)
-        a = 0.5                                     # field transparency
+        a = 0.5   # alpha for the fields
 
         fig = Figure(figsize=(16 * CM, 16 * CM), dpi=150)
         ax = fig.add_subplot(111, aspect='equal', frameon=False, xticks=[], yticks=[])
@@ -155,9 +155,9 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
         ax.plot(np.array([0.5, 1, 1.5, 1, 0.5]) + offset,
                 h * np.array([1, 2, 1, 0, 1]) + offset * t3, '-k', lw=1.0)
 
-        # grid at 20 % and tick labels
+        # grid lines and tick labels
         ticklabels = ['0', '20', '40', '60', '80', '100']
-        R = 1 + 2 * offset                           # x shift of the right triangle
+        R = 1 + 2 * offset   # shift for the right triangle
         for i, x in enumerate(np.linspace(0, 1, 6)):
             inner = i in [1, 2, 3, 4]
             for sx, lab_bottom, lab_right, lab_left in [
@@ -204,7 +204,7 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
         ax.text(1.25 + offset + offset * c30, h + offset * t3 + 0.25 * t3 + offset * s30,
                 'Ca$^{2+}$+Mg$^{2+}$ (%)', ha='center', va='center', rotation=-60)
 
-        # coloured fields: cation triangle
+        # fill the cation triangle
         ax.fill([0.25, 0.5, 0.75], [h / 2, 0, h / 2], color=PIPER['Mixed'], zorder=0, alpha=a, lw=0)
         ax.fill([0.25, 0.5, 0.75], [h / 2, h, h / 2], color=PIPER['Mg'], zorder=0, alpha=a, lw=0)
         ax.fill([0.0, 0.5, 0.25], [0, 0, h / 2], color=PIPER['Ca'], zorder=0, alpha=a, lw=0)
@@ -216,7 +216,7 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
         ax.fill([R + 0.25, R + 0.75, R + 0.5], [h / 2, h / 2, h], color=PIPER['SO4'], zorder=0, alpha=a, lw=0)
         # diamond
         x0 = 0.5 + offset + 0.25
-        yc = h + offset * t3                          # centre height of the diamond
+        yc = h + offset * t3   # middle of the diamond
         s60 = 0.5 * np.sin(np.pi / 3)
         ax.fill([x0, x0 + 0.5, x0 + 0.25], [yc - s60, yc - s60, yc], color=PIPER['Mixed'], zorder=0, lw=0)
         ax.fill([x0, x0 + 0.25, x0 + 0.5], [yc + s60, yc, yc + s60], color=PIPER['Mixed'], zorder=0, lw=0)
@@ -236,7 +236,7 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
             ax.text(1.62 + offset, 1.2 * h - 0.02, 'Na-Cl', color=PIPER['Na-Cl'], **kw)
             ax.text(1.0 + offset, yc + s60 - h - 0.49, 'Na-HCO$_3$', color=PIPER['Na-HCO3'], **kw)
 
-        # the samples
+        # plot the samples
         styles = group_styles(v)
         hollow = hollow_mask(v, ['piper'])
         cvals = v[color_by] if color_by else None
@@ -278,7 +278,7 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
 
 # %% Schoeller
 def schoeller(v):
-    """Schoeller diagram: log meq/L across the major ions, one line per sample."""
+    # Schoeller diagram (meq/L, log scale)
     ions = ['Ca', 'Mg', 'Na', 'K', 'Cl', 'SO4', 'HCO3']
     ticks = ['Ca$^{2+}$', 'Mg$^{2+}$', 'Na$^+$', 'K$^+$', 'Cl$^-$', 'SO$_4^{2-}$', 'HCO$_3^-$']
     with matplotlib.rc_context(STYLE):
@@ -312,7 +312,7 @@ def schoeller(v):
 
 # %% Stiff
 def stiff(v, samples, ncols=4):
-    """A grid of Stiff diagrams on a common meq/L scale, filled by group colour."""
+    # grid of Stiff diagrams, all on the same meq/L scale
     sub = v[v['Sample'].isin(samples)]
     n = len(sub)
     if n == 0:
@@ -357,17 +357,13 @@ def stiff(v, samples, ncols=4):
     return fig
 
 
-# %% WQChartPy pass-through
+# %% WQChartPy diagrams
 WQ_DIAGRAMS = {'Durov': 'durvo', 'Gibbs': 'gibbs', 'Chadha': 'chadha', 'HFE-D': 'hfed'}
 
 
 def wqchartpy_figure(v, kind):
-    """Durov, Gibbs, Chadha or HFE-D exactly as WQChartPy draws them.
-
-    WQChartPy wants mg/L columns named by ion, plus Label/Color/Marker/Size/
-    Alpha, and it saves to disk as a side effect. We build that frame, let it
-    write into a temporary folder, and hand back the open figure.
-    """
+    # Durov, Gibbs, Chadha, HFE-D from WQChartPy as is
+    # WQChartPy saves a file itself, so send that to a temp folder and keep the figure
     import importlib
     import matplotlib.pyplot as plt
 
@@ -386,8 +382,7 @@ def wqchartpy_figure(v, kind):
     w = w.dropna(subset=['pH', 'Ca', 'Mg', 'Na', 'HCO3', 'Cl', 'SO4', 'TDS']).reset_index(drop=True)
     note = ''
     if kind == 'Durov':
-        # WQChartPy's Durov has a fixed TDS axis that ends at 4000 mg/L. One
-        # saline sample beyond it stretches the axes and flattens the diagram.
+        # the WQChartPy Durov TDS axis stops at 4000 mg/L, so drop anything above
         over = w['TDS'] > 4000
         if over.any():
             note = f'{int(over.sum())} sample(s) with TDS above 4000 mg/L are not shown: the WQChartPy Durov has a fixed TDS axis.'
@@ -408,15 +403,13 @@ def wqchartpy_figure(v, kind):
     return fig, note
 
 
-# %% diagnostic gallery
-# Each panel: x and y are column names in the table `v`.
-#   lines: reference lines, each one of
-#     ('slope', m, label)      y = m x through the origin
-#     ('h', value, label)      horizontal line
-#     ('v', value, label)      vertical line
-#     ('sw', ion)              seawater dilution line for ion against Cl
-#     ('swratio', ratio_value) horizontal seawater ratio
-#   xlog / ylog: default scales (ratios and Cl span decades)
+# %% gallery
+# x and y are column names in v
+# lines:
+#   ('slope', m, label)   y = m*x
+#   ('h', value, label)   horizontal line
+#   ('v', value, label)   vertical line
+#   ('sw', ion)           seawater ratio line (ion vs Cl)
 def _sw(ion):
     return SEAWATER_MMOL[ion] / SEAWATER_MMOL['Cl']
 
@@ -501,7 +494,7 @@ _LINE_STYLES = ['--', ':', '-.']
 
 
 def available(v, panel):
-    """A panel is drawn only if both variables exist and share at least one sample."""
+    # only draw a panel if both variables have data
     x, y = panel['x'], panel['y']
     if x not in v.columns or y not in v.columns:
         return False
@@ -524,8 +517,7 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
         ax.set_xscale('log')
     if ylog:
         ax.set_yscale('log')
-    # Freeze the data limits before adding reference lines so a seawater line
-    # cannot stretch the axes away from the samples.
+    # set the axis limits from the data before adding reference lines
     if ok.any() and not xlog and not ylog and not panel.get('origin', False):
         if x[ok].min() >= 0:
             ax.set_xlim(left=0)
@@ -565,11 +557,7 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
 
 
 def gallery_page(v, panels, log_conc=False, color_by=None):
-    """Up to six panels, 2 across by 3 down, with one shared group legend.
-
-    Layout follows plot_major_ions in PiperScript.py (17 cm wide, legend along
-    the bottom).
-    """
+    # up to 6 panels (2 x 3) with one legend along the bottom
     panels = [p for p in panels if available(v, p)]
     if not panels:
         return None
@@ -609,7 +597,7 @@ def gallery_page(v, panels, log_conc=False, color_by=None):
 # %% custom plot
 def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zero_line=False,
            annotate=False):
-    """Any plottable column against any other."""
+    # user picks x and y
     panel = dict(x=x, y=y, xlog=xlog, ylog=ylog, lines=[], origin=True)
     if one_to_one:
         panel['lines'].append(('slope', 1.0, '1:1'))
@@ -640,7 +628,7 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
     return fig
 
 
-# %% export helper
+# %% png for download
 def fig_png(fig, dpi=300):
     import io
     buf = io.BytesIO()

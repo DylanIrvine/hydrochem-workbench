@@ -1,5 +1,4 @@
-# Checks on the chemistry: unit conversion, charge balance, fill rules, Piper
-# geometry and a PHREEQC sanity test that does not depend on our own numbers.
+# tests for core/chem.py
 import numpy as np
 import pandas as pd
 import pytest
@@ -25,7 +24,7 @@ def run(raw, unit='mg/L', rules=None, **kw):
 
 
 def test_units_agree():
-    # 40.078 mg/L Ca = 1 mmol/L = 2 meq/L, whichever way it is entered
+    # 40.078 mg/L Ca = 1 mmol/L = 2 meq/L
     a, _ = run(one_sample(pH=7, Temp=25, Ca=40.078, Mg=0, Na=0, K=0, HCO3=122.034, Cl=0, SO4=0), 'mg/L')
     b, _ = run(one_sample(pH=7, Temp=25, Ca=1.0, Mg=0, Na=0, K=0, HCO3=2.0, Cl=0, SO4=0), 'mmol/L')
     c, _ = run(one_sample(pH=7, Temp=25, Ca=2.0, Mg=0, Na=0, K=0, HCO3=2.0, Cl=0, SO4=0), 'meq/L')
@@ -61,7 +60,7 @@ def test_fill_rules_flag_the_right_samples():
     assert t.at[2, 'HCO3 (mmol/L)'] == pytest.approx(1.5, rel=1e-4)
     assert t.at[2, 'Filled'] == 'pH, Temp, HCO3'
     assert t.at[0, 'Filled'] == ''
-    # hollow only where the fill matters
+    # hollow markers
     assert not chem.hollow_mask(t, ['Na (mmol/L)', 'Cl (mmol/L)'])[2]
     assert chem.hollow_mask(t, ['SI Calcite', 'Cl (mmol/L)'])[2]
     assert not chem.hollow_mask(t, ['SI Calcite'])[0]
@@ -77,37 +76,36 @@ def test_piper_corners_and_water_types():
         base.update(meq)
         return chem.piper_coords(pd.DataFrame([base], dtype=float)).iloc[0]
     h = 0.5 * np.tan(np.pi / 3)
-    p = pos(Ca=1, HCO3=1)                      # pure Ca-HCO3: left corner of the diamond
+    p = pos(Ca=1, HCO3=1)   # left corner
     assert (p.cat_x, p.cat_y) == pytest.approx((0, 0))
     assert (p.d_x, p.d_y) == pytest.approx((0.6, h + 0.1 * np.tan(np.pi / 3)))
-    p = pos(Na=1, Cl=1)                        # pure Na-Cl: right corner
+    p = pos(Na=1, Cl=1)   # right corner
     assert p.d_x == pytest.approx(1.6)
 
 
 def test_water_type_follows_the_shaded_fields():
-    assert chem.water_type(1.0, 0.0) == 'Mg-HCO3'      # left corner (Ca-Mg-HCO3 waters)
-    assert chem.water_type(0.0, 1.0) == 'Na-Cl'        # right corner
-    assert chem.water_type(1.0, 1.0) == 'Ca-Cl'        # top
-    assert chem.water_type(0.0, 0.0) == 'Na-HCO3'      # bottom
-    assert chem.water_type(0.5, 0.5) == 'Mixed'        # centre
+    assert chem.water_type(1.0, 0.0) == 'Mg-HCO3'
+    assert chem.water_type(0.0, 1.0) == 'Na-Cl'
+    assert chem.water_type(1.0, 1.0) == 'Ca-Cl'
+    assert chem.water_type(0.0, 0.0) == 'Na-HCO3'
+    assert chem.water_type(0.5, 0.5) == 'Mixed'
     assert chem.water_type(0.9, 0.3) == 'Mg-HCO3'
-    assert chem.water_type(0.6, 0.7) == 'Mixed'        # upper grey triangle
+    assert chem.water_type(0.6, 0.7) == 'Mixed'
 
 
 def test_phreeqc_recovers_calcite_equilibrium():
-    # Make a water that PHREEQC itself has equilibrated with calcite, read its
-    # composition back, push that through our pipeline, and expect SI = 0.
+    # water equilibrated with calcite in PHREEQC should come back with SI = 0
     import phreeqpython
     pp = phreeqpython.PhreeqPython(database='phreeqc.dat')
     s = pp.add_solution({'units': 'mmol/l', 'pH': 7.0, 'temp': 25, 'Na': 1, 'Cl': 1})
     s.equalize(['Calcite', 'CO2(g)'], [0.0, -2.0])
     ca = s.total('Ca', units='mmol')
-    alk = 2 * ca                                 # all alkalinity came from calcite
+    alk = 2 * ca
     raw = one_sample(pH=s.pH, Temp=25, Ca=ca, Mg=0, Na=1, K=0, HCO3=alk, Cl=1, SO4=0)
     t, _ = run(raw, 'mmol/L')
     assert t.at[0, 'SI Calcite'] == pytest.approx(0.0, abs=0.02)
     assert t.at[0, 'log pCO2'] == pytest.approx(-2.0, abs=0.02)
-    assert np.isnan(t.at[0, 'SI Gypsum'])                # no sulfate, so no gypsum SI
+    assert np.isnan(t.at[0, 'SI Gypsum'])   # no SO4
 
 
 def test_template_round_trip():

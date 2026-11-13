@@ -1,15 +1,18 @@
-# core/chem.py
-# Everything between the uploaded spreadsheet and the plots:
-#   1. the template (what columns exist, what they mean)
-#   2. reading and cleaning an upload
-#   3. unit conversion (mg/L, mmol/L, meq/L in; all three out)
-#   4. filling missing pH, temperature and bicarbonate
-#   5. PHREEQC speciation (saturation indices, pCO2, ionic strength)
-#   6. the derived-variable table that every plot draws from
+# This file is part of hydrochem-workbench.
+# Copyright (C) 2026 Dylan Irvine
 #
-# The plots never touch raw input. They read one table, `v`, in which every
-# column name carries its unit. That is what lets the custom plot builder offer
-# "anything against anything" without special cases.
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
+#
+# piper_coords() uses the coordinate transform from WQChartPy
+# (triangle_piper.py), Copyright (C) the WQChartPy authors (Yang et al., 2022),
+# GPL-3.0: https://github.com/jyangfsu/WQChartPy. Modified 2026.
+
+# core/chem.py
+# template, reading the upload, unit conversion, filling gaps, PHREEQC,
+# and the table of derived variables used by the plots
 
 # %%
 import io
@@ -18,16 +21,15 @@ import numpy as np
 import pandas as pd
 
 # %% analytes
-# name: (molar mass g/mol, charge, PHREEQC master species)
-# SiO2 is neutral, so it has no meq/L. If the user picks meq/L as the input
-# unit, SiO2 is read as mmol/L (stated in the template notes).
+# name: (g/mol, charge, PHREEQC name)
+# SiO2 has no charge, so it is read as mmol/L if the input unit is meq/L
 ANALYTES = {
     'Ca':   (40.078,  +2, 'Ca'),
     'Mg':   (24.305,  +2, 'Mg'),
     'Na':   (22.990,  +1, 'Na'),
     'K':    (39.098,  +1, 'K'),
-    'HCO3': (61.017,  -1, None),      # goes to PHREEQC as Alkalinity
-    'CO3':  (60.009,  -2, None),      # goes to PHREEQC as Alkalinity
+    'HCO3': (61.017,  -1, None),      # passed as Alkalinity
+    'CO3':  (60.009,  -2, None),      # passed as Alkalinity
     'Cl':   (35.453,  -1, 'Cl'),
     'SO4':  (96.06,   -2, 'S(6)'),
     'NO3':  (62.004,  -1, 'N(5)'),
@@ -51,21 +53,18 @@ TEMPLATE_COLS = ID_COLS + FIELD_COLS + list(ANALYTES) + STYLE_COLS
 
 UNITS = ['mg/L', 'mmol/L', 'meq/L']
 
-# Alkalinity as CaCO3 to HCO3: 2 x 61.017 / 100.087
+# alkalinity as CaCO3 -> HCO3 (2 x 61.017 / 100.087)
 CACO3_TO_HCO3 = 1.2193
-# Nitrate as N to NO3: 62.004 / 14.007
+# NO3-N -> NO3 (62.004 / 14.007)
 N_TO_NO3 = 4.4267
 
-# Standard mean seawater, mg/L (rounded values as tabulated in Hem, 1985, USGS
-# Water-Supply Paper 2254). Used only for reference lines on the plots.
+# seawater in mg/L (Hem, 1985). Only used for reference lines
 SEAWATER_MGL = {'Cl': 19350, 'Na': 10760, 'SO4': 2710, 'Mg': 1290, 'Ca': 411,
                 'K': 399, 'HCO3': 142, 'Br': 67, 'Sr': 8.0, 'F': 1.3}
 SEAWATER_MMOL = {k: val / ANALYTES[k][0] for k, val in SEAWATER_MGL.items()}
 
-# Minerals reported when the elements they need are present. Redox-sensitive
-# phases (iron and manganese oxides, sulfides) are left out on purpose: the
-# template has no pe or Eh, and a saturation index built on a default pe is
-# decoration, not data.
+# minerals to report, and the ions each one needs
+# no Fe/Mn/sulfide phases as there is no pe or Eh in the template
 MINERALS = {
     'Calcite':      ['Ca', 'HCO3'],
     'Aragonite':    ['Ca', 'HCO3'],
@@ -81,14 +80,13 @@ MINERALS = {
     'Strontianite': ['Sr', 'HCO3'],
 }
 
-# Above this ionic strength the ion-association model in phreeqc.dat starts to
-# drift and the Pitzer approach is the appropriate one. Seawater is about 0.7.
+# warn above this ionic strength (phreeqc.dat is not for saline water, seawater ~0.7)
 IONIC_STRENGTH_WARN = 0.5
 
 
 # %% template
 def template_bytes():
-    """The downloadable .xlsx template: a Data sheet and a Notes sheet."""
+    # xlsx template: Data sheet + Notes sheet
     example = example_data().head(3)
     notes = pd.DataFrame({'Column': [
         'Sample', 'Label', 'pH', 'Temp', 'EC', 'TDS',
@@ -127,22 +125,17 @@ def template_bytes():
 
 
 def example_data():
-    """A SYNTHETIC dataset for demonstration. Not real samples.
-
-    Three made-up groups: a carbonate aquifer, a sandstone aquifer evolving
-    towards Na-Cl, and a saline group, with a few deliberate gaps so the fill
-    rule and hollow markers have something to do.
-    """
+    # synthetic example data (not real samples), 3 groups, a few gaps left in on purpose
     rng = np.random.default_rng(7)
     rows = []
-    for k in range(10):                      # carbonate: Ca-Mg-HCO3
+    for k in range(10):   # carbonate
         f = rng.uniform(0.6, 1.4)
         rows.append(['CB%02d' % (k + 1), 'Carbonate (synthetic)',
                      rng.uniform(6.9, 7.5), rng.uniform(28, 32), np.nan, np.nan,
                      62 * f, 31 * f, 8 * rng.uniform(0.5, 2), 1.5, 330 * f, 0,
                      9 * rng.uniform(0.5, 2.5), 6 * rng.uniform(0.5, 2),
                      0.8, 0.03, 0.15, 14, 0.12, 0.05, np.nan, np.nan])
-    for k in range(10):                      # sandstone: mixed, some Na-HCO3
+    for k in range(10):   # sandstone
         f = rng.uniform(0.5, 2.5)
         rows.append(['SS%02d' % (k + 1), 'Sandstone (synthetic)',
                      rng.uniform(6.2, 7.9), rng.uniform(29, 34), np.nan, np.nan,
@@ -150,7 +143,7 @@ def example_data():
                      70 * f, 6, 150 * rng.uniform(0.6, 1.5), 0,
                      75 * f, 28 * rng.uniform(0.4, 2.5),
                      1.2, 0.26 * f, 0.4, 32, 0.3, 0.08, 0.4, 0.05])
-    for k in range(6):                       # saline: Na-Cl, gypsum influence
+    for k in range(6):    # saline
         f = rng.uniform(1, 6)
         rows.append(['SA%02d' % (k + 1), 'Saline (synthetic)',
                      rng.uniform(7.0, 7.8), rng.uniform(27, 31), np.nan, np.nan,
@@ -162,7 +155,7 @@ def example_data():
             'HCO3', 'CO3', 'Cl', 'SO4', 'NO3', 'Br', 'F', 'SiO2', 'Sr', 'Ba',
             'Fe', 'Mn']
     df = pd.DataFrame(rows, columns=cols).round(3)
-    # deliberate gaps
+    # leave some gaps
     df.loc[3, 'pH'] = np.nan
     df.loc[14, 'HCO3'] = np.nan
     df.loc[22, 'Temp'] = np.nan
@@ -173,7 +166,7 @@ def example_data():
 
 # %% read and clean
 def read_upload(file):
-    """Read the Data sheet (or a csv). Returns the raw frame, untouched."""
+    # reads the Data sheet, or a csv
     name = getattr(file, 'name', '') or ''
     if name.lower().endswith('.csv'):
         raw = pd.read_csv(file, dtype=object)
@@ -185,14 +178,7 @@ def read_upload(file):
 
 
 def clean(raw):
-    """Coerce to numbers and report what would not coerce.
-
-    Returns (df, dropped, extra_cols, problems).
-      dropped     one row per cell that held text where a number was expected
-                  (the "<0.05" and "bd" cases). They become NaN.
-      extra_cols  numeric columns that are not part of the template.
-      problems    list of strings that stop the run (e.g. no Sample column).
-    """
+    # convert to numbers. Text cells (<0.05, bd etc.) go to NaN and are listed in dropped
     problems = []
     df = raw.copy()
 
@@ -236,14 +222,14 @@ def clean(raw):
                                 'Value': df.at[i, c]})
             df[c] = num
         elif num.notna().sum() >= max(1, int(0.5 * df[c].notna().sum())):
-            # mostly numeric: treat as a plottable extra variable
+            # extra numeric column, keep it for plotting
             for i in df.index[bad]:
                 dropped.append({'Sample': df.at[i, 'Sample'], 'Column': c,
                                 'Value': df.at[i, c]})
             df[c] = num
             extra_cols.append(c)
 
-    # Negative concentrations are not physical; treat them like text.
+    # negative concentrations are dropped too
     for c in list(ANALYTES):
         neg = df[c] < 0
         for i in df.index[neg]:
@@ -256,12 +242,7 @@ def clean(raw):
 
 # %% units
 def to_mmol(df, unit, alk_as_caco3=False, no3_as_n=False):
-    """Concentration columns in the user's unit to mmol/L.
-
-    The two "reported as" switches only mean something for mg/L. In molar or
-    equivalent units, alkalinity as CaCO3 is still handled (1 mmol CaCO3 =
-    2 meq = 2 mmol HCO3), nitrate as N is identical to nitrate as NO3.
-    """
+    # everything to mmol/L
     mmol = pd.DataFrame(index=df.index)
     for a, (mw, z, _) in ANALYTES.items():
         x = df[a].astype(float)
@@ -269,7 +250,7 @@ def to_mmol(df, unit, alk_as_caco3=False, no3_as_n=False):
             mmol[a] = x / mw
         elif unit == 'mmol/L':
             mmol[a] = x
-        else:  # meq/L
+        else:
             mmol[a] = x / abs(z) if z != 0 else x
 
     if alk_as_caco3:
@@ -277,7 +258,7 @@ def to_mmol(df, unit, alk_as_caco3=False, no3_as_n=False):
             mmol['HCO3'] = df['HCO3'].astype(float) * CACO3_TO_HCO3 / ANALYTES['HCO3'][0]
         elif unit == 'mmol/L':
             mmol['HCO3'] = df['HCO3'].astype(float) * 2.0
-        # meq/L of alkalinity is already meq/L of HCO3
+        # in meq/L nothing to do
     if no3_as_n and unit == 'mg/L':
         mmol['NO3'] = df['NO3'].astype(float) * N_TO_NO3 / ANALYTES['NO3'][0]
     return mmol
@@ -285,15 +266,8 @@ def to_mmol(df, unit, alk_as_caco3=False, no3_as_n=False):
 
 # %% fill
 def fill_missing(df, mmol, rules):
-    """Fill missing pH, Temp and HCO3. Returns (df, mmol, filled flags).
-
-    rules = {'pH': ('mean' | 'value', number), 'Temp': (...), 'HCO3': (...)}
-    HCO3 also accepts 'balance': the bicarbonate that closes the charge
-    balance. The HCO3 number for 'value' is in mmol/L.
-
-    A sample only gets a filled HCO3 if it has at least one other major ion,
-    so an empty row stays empty.
-    """
+    # fill missing pH, Temp, HCO3. rules = {'pH': ('mean' or 'value', number), ...}
+    # HCO3 can also be 'balance' (from charge balance). HCO3 value is in mmol/L
     df = df.copy()
     mmol = mmol.copy()
     filled = pd.DataFrame(False, index=df.index, columns=['pH', 'Temp', 'HCO3'])
@@ -331,15 +305,7 @@ def fill_missing(df, mmol, rules):
 
 # %% PHREEQC
 def run_phreeqc(df, mmol, pp):
-    """Speciate every sample with phreeqc.dat. Returns a frame of outputs.
-
-    `pp` is a phreeqpython.PhreeqPython instance (made once by the app and
-    reused, because loading the database is the slow part).
-
-    Alkalinity goes in as equivalents (HCO3 + 2 CO3), which is what a titration
-    measures and what PHREEQC expects. pe is left at the PHREEQC default; no
-    redox-sensitive output is reported.
-    """
+    # run each sample through phreeqc.dat. Alkalinity is passed as meq (HCO3 + 2*CO3)
     out = pd.DataFrame(index=df.index, dtype=float)
     cols = ['SI ' + m for m in MINERALS] + ['log pCO2', 'Ionic strength (mol/kgw)',
                                             'SC calc (uS/cm)']
@@ -362,7 +328,7 @@ def run_phreeqc(df, mmol, pp):
 
         try:
             s = pp.add_solution(sol)
-        except Exception as exc:                      # PHREEQC did not converge
+        except Exception as exc:   # did not converge
             errors.append({'Sample': df.at[i, 'Sample'], 'Error': str(exc)[:200]})
             continue
 
@@ -379,13 +345,9 @@ def run_phreeqc(df, mmol, pp):
     return out, pd.DataFrame(errors, columns=['Sample', 'Error'])
 
 
-# %% the derived-variable table
+# %% derived variables
 def piper_coords(meq):
-    """Cartesian coordinates on the trilinear Piper diagram.
-
-    Same geometry as WQChartPy's triangle_piper (Yang et al., 2022,
-    Groundwater): unit triangles, offset 0.1 between triangles and diamond.
-    """
+    # x-y coordinates on the Piper, same geometry as WQChartPy triangle_piper
     offset = 0.10
     h = 0.5 * np.tan(np.pi / 3.0)
     ca, mg = meq['Ca'], meq['Mg']
@@ -406,21 +368,9 @@ def piper_coords(meq):
 
 
 def water_type(p, q):
-    """Water type from the field of the Piper diamond the sample falls in.
-
-    p = (Ca + Mg) as a fraction of cations, q = (SO4 + Cl) as a fraction of
-    anions, both in meq/L. The fields are the ones shaded on the diagram:
-
-        Ca-Cl     top triangle       p + q > 1.5
-        Na-HCO3   bottom triangle    p + q < 0.5
-        Mg-HCO3   left diamond       p > 0.5 and q < 0.5
-        Na-Cl     right diamond      p < 0.5 and q > 0.5
-        Mixed     the two grey triangles in between
-
-    PiperScript.py classified on diamond x-y coordinates with thresholds that
-    did not line up with its own shaded fields (a sample sitting in the
-    Mg-HCO3 field came back as Na-HCO3). This version follows the drawing.
-    """
+    # water type from the shaded field in the Piper diamond
+    # p = (Ca+Mg)/cations, q = (SO4+Cl)/anions, in meq
+    # nb. the rule in the old PiperScript.py did not match the shaded fields
     if pd.isna(p) or pd.isna(q):
         return ''
     if p + q > 1.5:
@@ -435,18 +385,13 @@ def water_type(p, q):
 
 
 def _ratio(a, b):
-    """a / b with zero and missing denominators returning NaN, not inf."""
     b = b.where(b > 0)
     return a / b
 
 
 def build_table(df, mmol, filled, phreeqc, extra_cols):
-    """Assemble `v`, the one table every plot reads.
-
-    Column naming: 'Na (mmol/L)', 'Na (meq/L)', 'Na (mg/L)'; molar ratios as
-    'Na/Cl'; sums in meq/L as 'Ca+Mg (meq/L)'; PHREEQC output as 'SI Calcite'.
-    """
-    v = {}          # filled as a dict, turned into a frame at the end
+    # the one table (v) that all the plots use. Units are in the column names
+    v = {}
     v['Sample'] = df['Sample']
     v['Label'] = df['Label']
     v['Color'] = df['Color']
@@ -466,15 +411,14 @@ def build_table(df, mmol, filled, phreeqc, extra_cols):
     for a in ANALYTES:
         v[f'{a} (mg/L)'] = mgl[a]
 
-    # charge balance, signed: positive means excess cations
+    # charge balance error (positive = excess cations)
     sumcat = meq[CATIONS].sum(axis=1, min_count=1)
     suman = meq[ANIONS].sum(axis=1, min_count=1)
     v['Sum cations (meq/L)'] = sumcat
     v['Sum anions (meq/L)'] = suman
     v['CBE (%)'] = (sumcat - suman) / (sumcat + suman) * 100
 
-    # TDS: measured if given, otherwise the sum of ions with bicarbonate
-    # converted to its carbonate residue (x 0.4917), the usual convention.
+    # TDS: measured if given, otherwise sum of ions (HCO3 x 0.4917)
     tds_calc = mgl.drop(columns=['HCO3']).sum(axis=1, min_count=1) + 0.4917 * mgl['HCO3'].fillna(0)
     v['TDS calc (mg/L)'] = tds_calc
     v['TDS (mg/L)'] = df['TDS'].where(df['TDS'].notna(), tds_calc)
@@ -492,7 +436,7 @@ def build_table(df, mmol, filled, phreeqc, extra_cols):
     v['HCO3/SiO2'] = _ratio(mmol['HCO3'], mmol['SiO2'])
     v['SO4/HCO3'] = _ratio(mmol['SO4'], mmol['HCO3'])
 
-    # sums and differences in meq/L (process plots)
+    # sums and differences in meq/L
     k0 = meq['K'].fillna(0)
     v['Na+K (meq/L)'] = meq['Na'] + k0
     v['Ca+Mg (meq/L)'] = meq['Ca'] + meq['Mg']
@@ -501,9 +445,9 @@ def build_table(df, mmol, filled, phreeqc, extra_cols):
     v['Ca+Mg-HCO3-SO4 (meq/L)'] = meq['Ca'] + meq['Mg'] - meq['HCO3'] - meq['SO4']
     v['Ca+Mg-HCO3 (meq/L)'] = meq['Ca'] + meq['Mg'] - meq['HCO3']
     v['(Ca+Mg)/(HCO3+SO4)'] = _ratio(meq['Ca'] + meq['Mg'], meq['HCO3'] + meq['SO4'])
-    # chloro-alkaline index 1 (Schoeller): positive = Na released to solid
+    # chloro-alkaline index (CAI-1)
     v['CAI-1'] = _ratio(meq['Cl'] - (meq['Na'] + k0), meq['Cl'])
-    # Gibbs ratios are defined on mg/L
+    # Gibbs ratios use mg/L
     v['Na/(Na+Ca) (mg/L basis)'] = _ratio(mgl['Na'], mgl['Na'] + mgl['Ca'])
     v['Cl/(Cl+HCO3) (mg/L basis)'] = _ratio(mgl['Cl'], mgl['Cl'] + mgl['HCO3'])
 
@@ -511,7 +455,7 @@ def build_table(df, mmol, filled, phreeqc, extra_cols):
     for c in phreeqc.columns:
         v[c] = phreeqc[c]
 
-    # Piper position and water type
+    # Piper coordinates and water type
     pc = piper_coords(meq)
     for c in pc.columns:
         v['piper_' + c] = pc[c]
@@ -529,7 +473,7 @@ def build_table(df, mmol, filled, phreeqc, extra_cols):
     return pd.DataFrame(v, index=df.index)
 
 
-# %% which samples are drawn hollow on a given plot
+# %% hollow markers
 _HCO3_DEPENDENT = {'CBE (%)', 'Sum anions (meq/L)', 'TDS calc (mg/L)',
                    'Ca+Mg-HCO3-SO4 (meq/L)', 'Ca+Mg-HCO3 (meq/L)',
                    '(Ca+Mg)/(HCO3+SO4)', 'Cl/(Cl+HCO3) (mg/L basis)'}
@@ -537,11 +481,7 @@ _PHREEQC_EXTRA = {'log pCO2', 'Ionic strength (mol/kgw)', 'SC calc (uS/cm)'}
 
 
 def hollow_mask(v, cols):
-    """True where a sample's position on a plot of `cols` rests on a filled value.
-
-    A filled pH moves a saturation index but not a Na against Cl plot, so the
-    marker is only hollow where the fill actually matters.
-    """
+    # True where a filled value affects the plot (so it gets a hollow marker)
     mask = pd.Series(False, index=v.index)
     for c in cols:
         if c.startswith('SI ') or c in _PHREEQC_EXTRA:
@@ -564,7 +504,7 @@ INTERNAL_COLS = {'Sample', 'Label', 'Color', 'Marker', 'Water type', 'Filled',
 
 
 def plottable(v):
-    """Numeric columns with at least one value, for the custom plot builder."""
+    # numeric columns for the custom plot dropdowns
     out = []
     for c in v.columns:
         if c in INTERNAL_COLS or c.startswith('piper_'):

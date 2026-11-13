@@ -1,0 +1,8 @@
+[theme]
+# Dark, centred, red highlight: the same look as HydroSTITCH.
+base = "dark"
+primaryColor = "#FF4B4B"
+
+[browser]
+# Do not send Streamlit usage telemetry from the visitor's browser.
+gatherUsageStats = false

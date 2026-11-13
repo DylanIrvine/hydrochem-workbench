@@ -1,14 +1,22 @@
+# This file is part of hydrochem-workbench.
+# Copyright (C) 2026 Dylan Irvine
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
+
 # app.py
-# HydroCHEM: upload a hydrochemistry table, run it through PHREEQC, and get the
-# plots a hydrogeochemist would make first.
+# HydroCHEM: hydrochemistry plots and PHREEQC saturation indices
 #
-# Run locally:   streamlit run app.py
+# to run: streamlit run app.py
 #
-# The app is a thin layer. The chemistry is in core/chem.py and the figures are
-# in core/plots.py; both can be imported and used from Spyder without Streamlit.
+# calculations are in core/chem.py, figures in core/plots.py
 
 # %%
+import hashlib
 import io
+import os
 import zipfile
 
 import pandas as pd
@@ -18,46 +26,178 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from core import chem, plots
+from core.usage import increment as _record_use, status as _usage_status
 
 # %% CONFIG
 APP_NAME = 'HydroCHEM'
-APP_VERSION = '0.1'
+APP_VERSION = '0.2'
 PANELS_PER_PAGE = 6
 DEFAULT_PH = 7.0
 DEFAULT_TEMP = 25.0
 DEFAULT_HCO3_MMOL = 2.0
 MAX_STIFF = 24
 
-st.set_page_config(page_title=APP_NAME, layout='wide')
+# theme (dark, red) is set in .streamlit/config.toml
+st.set_page_config(page_title=APP_NAME, layout='centered')
 st.title(APP_NAME)
-st.caption(f'Version {APP_VERSION}. Hydrochemistry plots and PHREEQC saturation indices from one '
-           'spreadsheet. Freshwater database (phreeqc.dat).')
+st.caption(f'Version {APP_VERSION}')
+
+# %% intro
+st.write(
+    'HydroCHEM takes a spreadsheet of water chemistry, runs every sample through PHREEQC, and draws '
+    'the plots a hydrogeochemist would make first. Download the template from the sidebar, paste '
+    'your data in (one row per sample, one unit for every ion), choose the unit and upload it.\n\n'
+    'What comes back: charge balance, water type, saturation indices and pCO2, a Piper diagram, the '
+    'classical diagrams, a gallery of diagnostic ion, ratio and saturation-index plots with '
+    'reference lines, and a builder for any plot the gallery does not have. The database is '
+    'phreeqc.dat, so results are for fresh water; saline samples are flagged.')
 
 
-# %% cached pieces
+# %% usage counter
+# counts sessions that process a dataset. Uses Upstash Redis if the secrets
+# are set (as for HydroSTITCH), otherwise a local file. See core/usage.py
+def _counter_secret(name, env):
+    try:
+        sec = st.secrets
+        if 'redis' in sec and name in sec['redis']:
+            return str(sec['redis'][name])
+        if env in sec:
+            return str(sec[env])
+    except Exception:
+        pass
+    return os.environ.get(env)
+
+
+def _counter_args():
+    return dict(redis_url=_counter_secret('rest_url', 'UPSTASH_REDIS_REST_URL'),
+                redis_token=_counter_secret('rest_token', 'UPSTASH_REDIS_REST_TOKEN'),
+                redis_key=_counter_secret('key', 'HYDROCHEM_RUN_COUNT_KEY') or 'hydrochem:runs')
+
+
+@st.cache_data(ttl=90, show_spinner=False)
+def _counter_status():
+    return _usage_status(**_counter_args())
+
+
+def count_this_session():
+    # add 1 to the counter, once per session
+    if st.session_state.get('counted'):
+        return
+    st.session_state['counted'] = True
+    try:
+        total = _record_use(**_counter_args())
+    except Exception:
+        total = None
+    if total is not None:
+        st.session_state['use_count'] = total
+
+
+_use_count_slot = st.empty()
+
+
+def show_use_count():
+    status = _counter_status()
+    total = st.session_state.get('use_count') or status.get('count')
+    with _use_count_slot.container():
+        if total:
+            st.caption(f'{APP_NAME} sessions that have processed data: {total:,}')
+        if status['backend'] == 'redis-error':
+            st.caption(f":orange[Usage counter: Redis is configured but not reachable ({status['detail']}).]")
+
+
+show_use_count()
+
+# %% privacy
+with st.expander('**Privacy and data handling**'):
+    st.markdown(
+        '**Your data**\n'
+        '- The file you upload is read into memory for your session, processed, and discarded when '
+        'you close or refresh the page. The app does not save it to a database or to any permanent '
+        'storage.\n'
+        '- Nothing is sent to a third party. PHREEQC runs inside the app, not as an outside service.\n'
+        '- Sample coordinates, site names or anything else in your spreadsheet are treated the '
+        'same way: used for your plots, then gone. The results exist only in the files you download.\n\n'
+        '**You**\n'
+        '- No login, and no record kept by this app of who you are or where you are. The app does '
+        'not log IP addresses or locations.\n'
+        '- The only thing recorded is a single running total: the number of sessions that have '
+        'processed a dataset (and the time it was last updated). It has no link to any user or '
+        'file.\n\n'
+        '**What this does not cover**\n'
+        '- Processing happens on the server that hosts the app, not on your computer. If you are '
+        'using the public web version, your file travels to that host (which may be outside '
+        'Australia) for the length of your session. The hosting provider and the Streamlit '
+        'framework may use their own cookies and keep their own server logs, under their own '
+        'privacy policies.\n'
+        '- If your data are confidential or subject to a data agreement, run the app on your own '
+        'machine. The code is open source and the README has the two commands needed.')
+
+# %% citations
+with st.expander('**How to cite and references**'):
+    st.markdown(
+        'If you use output from this app, please cite the software it is built on.\n\n'
+        '**Geochemical calculations (PHREEQC)**\n\n'
+        'Parkhurst, D.L. and Appelo, C.A.J. (2013). Description of input and examples for PHREEQC '
+        'version 3: a computer program for speciation, batch-reaction, one-dimensional transport, '
+        'and inverse geochemical calculations. U.S. Geological Survey Techniques and Methods, '
+        'book 6, chapter A43, 497 p. https://pubs.usgs.gov/tm/06/a43/\n\n'
+        'PHREEQC is called through phreeqpython (Vitens): https://github.com/Vitens/phreeqpython\n\n'
+        '**Diagrams (WQChartPy)**\n\n'
+        'Yang, J., Liu, H., Tang, Z., Peeters, L. and Ye, M. (2022). Visualization of aqueous '
+        'geochemical data using Python and WQChartPy. Groundwater, 60(4), 555-564. '
+        'https://doi.org/10.1111/gwat.13185\n\n'
+        'The Piper diagram here is adapted from WQChartPy; the Durov, Gibbs, Chadha and HFE-D '
+        'diagrams are drawn by WQChartPy directly.\n\n'
+        '**Original diagram references**\n\n'
+        'Piper, A.M. (1944). A graphic procedure in the geochemical interpretation of '
+        'water-analyses. Eos, Transactions American Geophysical Union, 25(6), 914-928. '
+        'https://doi.org/10.1029/TR025i006p00914\n\n'
+        'Stiff, H.A. (1951). The interpretation of chemical water analysis by means of patterns. '
+        'Journal of Petroleum Technology, 3(10), 15-17. https://doi.org/10.2118/951376-G\n\n'
+        'Durov, S.A. (1948). Natural waters and graphic representation of their composition. '
+        'Doklady Akademii Nauk SSSR, 59, 87-90.\n\n'
+        'Gibbs, R.J. (1970). Mechanisms controlling world water chemistry. Science, 170(3962), '
+        '1088-1090. https://doi.org/10.1126/science.170.3962.1088\n\n'
+        'Chadha, D.K. (1999). A proposed new diagram for geochemical classification of natural '
+        'waters and interpretation of chemical data. Hydrogeology Journal, 7, 431-439. '
+        'https://doi.org/10.1007/s100400050216\n\n'
+        'Gimenez-Forcada, E. (2010). Dynamic of sea water interface using hydrochemical facies '
+        'evolution diagram. Groundwater, 48(2), 212-216. '
+        'https://doi.org/10.1111/j.1745-6584.2009.00649.x')
+
+
+# %% functions
 @st.cache_resource
 def get_phreeqc():
-    # Loading the database is the slow part, so do it once per server process.
+    # load the database once
     import phreeqpython
     return phreeqpython.PhreeqPython(database='phreeqc.dat')
 
 
-@st.cache_data(show_spinner='Running PHREEQC ...')
 def process(raw, unit, alk_as_caco3, no3_as_n, rules):
-    df, dropped, extra_cols, problems = chem.clean(raw)
-    # Duplicate sample names are reported but do not stop the run.
-    if any(not p.startswith('Duplicate') for p in problems):
-        return None, dropped, None, problems
-    mmol = chem.to_mmol(df, unit, alk_as_caco3, no3_as_n)
-    df, mmol, filled = chem.fill_missing(df, mmol, dict(rules))
-    phreeqc, errors = chem.run_phreeqc(df, mmol, get_phreeqc())
-    v = chem.build_table(df, mmol, filled, phreeqc, extra_cols)
-    return v, dropped, errors, problems
+    # clean, convert, fill, run PHREEQC
+    # results are kept in session_state (not st.cache_data) so nothing is held after the user leaves
+    key = hashlib.sha1((raw.to_csv() + repr((unit, alk_as_caco3, no3_as_n, rules))).encode()).hexdigest()
+    cached = st.session_state.get('result')
+    if cached is not None and cached[0] == key:
+        return cached[1]
+
+    with st.spinner('Running PHREEQC ...'):
+        df, dropped, extra_cols, problems = chem.clean(raw)
+        # duplicates are flagged but still run
+        if any(not p.startswith('Duplicate') for p in problems):
+            out = (None, dropped, None, problems)
+        else:
+            mmol = chem.to_mmol(df, unit, alk_as_caco3, no3_as_n)
+            df, mmol, filled = chem.fill_missing(df, mmol, dict(rules))
+            phreeqc, errors = chem.run_phreeqc(df, mmol, get_phreeqc())
+            out = (chem.build_table(df, mmol, filled, phreeqc, extra_cols), dropped, errors, problems)
+    st.session_state['result'] = (key, out)
+    return out
 
 
 def show(fig, name, key):
-    """Draw a figure with its own download button."""
-    st.pyplot(fig, use_container_width=False)
+    st.pyplot(fig, use_container_width=True)
     st.download_button('Download PNG (600 dpi)', plots.fig_png(fig, dpi=600),
                        file_name=name + '.png', mime='image/png', key=key)
 
@@ -105,12 +245,7 @@ elif uploaded is not None:
         st.error(f'Could not read that file: {exc}')
         st.stop()
 else:
-    st.markdown(
-        'Download the template from the sidebar, paste your data in, choose the unit, and upload it. '
-        'One row per sample, one unit for every ion.\n\n'
-        'What comes back: charge balance, water type, saturation indices and pCO2 from PHREEQC, '
-        'a Piper diagram, the classical diagrams, a gallery of diagnostic ion and ratio plots with '
-        'reference lines, and a builder for any plot the gallery does not have.')
+    st.info('Upload a filled template, or tick the synthetic example in the sidebar, to begin.')
     st.stop()
 
 v, dropped, errors, problems = process(raw, unit, alk_choice.startswith('Total'),
@@ -120,7 +255,10 @@ for p in problems:
 if v is None:
     st.stop()
 
-# %% messages that the user must not miss
+count_this_session()
+show_use_count()
+
+# %% warnings
 n_dropped = 0 if dropped is None else len(dropped)
 if n_dropped:
     st.warning(f'{n_dropped} cell(s) were not numbers (for example "<0.05") and were treated as '
@@ -142,8 +280,7 @@ if errors is not None and len(errors):
     st.warning(f'PHREEQC did not converge for {len(errors)} sample(s); see the Data tab.')
 
 numeric_choices = chem.plottable(v)
-# One view at a time, not st.tabs: Streamlit runs the body of every tab on every
-# click, which would redraw (and re-render at 600 dpi) figures nobody is looking at.
+# radio buttons and not st.tabs, as tabs redraw every figure on every click
 VIEWS = ['Data and checks', 'Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot', 'Export']
 view = st.radio('View', VIEWS, horizontal=True, label_visibility='collapsed')
 

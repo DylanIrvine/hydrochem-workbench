@@ -1,4 +1,4 @@
-# HydroCHEM (working name)
+# hydrochem-workbench
 
 Upload a hydrochemistry spreadsheet, run every sample through PHREEQC, and get
 the plots a hydrogeochemist makes first. Built to sit alongside HydroSILO and
@@ -38,11 +38,27 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
 5. **Export.** Results table with every derived variable and the settings used;
    a zip of all figures.
 
+## Privacy
+
+The app keeps an uploaded dataset in memory for the browser session only and
+never writes it to disk. The one thing it records is a running total of
+sessions that processed data (`core/usage.py`). For that total to survive a
+redeploy on Streamlit Cloud, add Upstash Redis secrets:
+
+    [redis]
+    rest_url = "https://....upstash.io"
+    rest_token = "..."
+
+The key defaults to `hydrochem:runs`, so it can share a database with the
+HydroSTITCH counter. `.streamlit/config.toml` turns off Streamlit's browser
+usage statistics.
+
 ## Layout
 
     app.py            Streamlit front end
     core/chem.py      template, cleaning, units, fill rules, PHREEQC, derived table
     core/plots.py     all figures
+    core/usage.py     the usage counter
     tests/            pytest: chemistry checks and a headless run of the app
 
 `core/` has no Streamlit in it and can be used from Spyder directly.
@@ -55,8 +71,22 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
   fixed TDS axis (0 to 4000 mg/L).
 - The bundled example data are synthetic.
 
-## Credits
+## Licence
 
-Piper geometry and the pass-through diagrams: WQChartPy, Yang et al. (2022),
-Groundwater, doi:10.1111/gwat.13185. Speciation: PHREEQC (Parkhurst and Appelo,
-USGS) through phreeqpython (Vitens).
+GPL-3.0-or-later (see `LICENSE`). The Piper diagram code is adapted from
+WQChartPy, which is GPL-3.0, so this project is released under the same terms.
+You are free to use, modify and share it; if you distribute a modified version
+you must release its source under the GPL as well. There is no warranty: the
+outputs are an aid to interpretation and should be checked before they are
+relied on.
+
+## Credits and third-party software
+
+- **WQChartPy** (GPL-3.0), Yang et al. (2022), Groundwater,
+  doi:10.1111/gwat.13185. Source of the Piper geometry (modified) and of the
+  Durov, Gibbs, Chadha and HFE-D diagrams (called unmodified).
+- **phreeqpython** (Apache-2.0), Vitens. Python wrapper for PHREEQC.
+- **PHREEQC** and `phreeqc.dat`, Parkhurst and Appelo, U.S. Geological Survey
+  (public domain).
+- Streamlit (Apache-2.0), pandas and NumPy (BSD-3-Clause), Matplotlib
+  (Matplotlib licence, BSD-style), openpyxl (MIT).

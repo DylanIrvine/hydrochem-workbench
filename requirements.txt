@@ -6,3 +6,4 @@ matplotlib>=3.8
 openpyxl>=3.1
 phreeqpython>=1.5.5
 wqchartpy>=0.1.10
+upstash-redis>=1.1

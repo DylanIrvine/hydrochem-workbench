@@ -1,5 +1,4 @@
-# Runs the whole app headless on the synthetic data and clicks through the
-# controls that change what is drawn.
+# runs the app on the example data and steps through the options
 import os
 
 from streamlit.testing.v1 import AppTest
@@ -7,14 +6,17 @@ from streamlit.testing.v1 import AppTest
 APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app.py')
 
 
-def test_app_runs_on_example_data():
+def test_app_runs_on_example_data(tmp_path, monkeypatch):
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
     at = AppTest.from_file(APP, default_timeout=120)
     at.run()
     assert not at.exception
-    at.checkbox[0].check().run()                 # synthetic example data
+    at.checkbox[0].check().run()   # example data
     assert not at.exception
     assert len(at.error) == 0
     assert any('filled' in i.value for i in at.info)
+    assert any('sessions that have processed data: 1' in c.value for c in at.caption)
+    assert [e.label for e in at.expander][:2] == ['**Privacy and data handling**', '**How to cite and references**']
 
     def go(view):
         at.radio[0].set_value(view).run()
@@ -38,3 +40,5 @@ def test_app_runs_on_example_data():
     go('Custom plot')
     go('Export')
     assert any(b.label == 'Build a zip of every figure' for b in at.button)
+    # should still be 1
+    assert any('sessions that have processed data: 1' in c.value for c in at.caption)
