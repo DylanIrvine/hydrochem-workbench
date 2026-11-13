@@ -35,6 +35,7 @@ import matplotlib
 import matplotlib.colors as mcolors
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from matplotlib.ticker import FuncFormatter, NullFormatter
 
 from core.chem import SEAWATER_MMOL, hollow_mask
 
@@ -430,58 +431,141 @@ def _ratio_vs_cl(ratio, sw=None):
 
 _SI_MAIN = ['Calcite', 'Dolomite', 'Gypsum', 'Halite', 'Fluorite', 'Chalcedony']
 _SI_MORE = ['Aragonite', 'Anhydrite', 'Quartz', 'Barite', 'Celestite', 'Strontianite']
+_SI_ALL = _SI_MAIN + _SI_MORE
+# SI within +/- this is treated as near equilibrium (shaded band)
+SI_BAND = 0.5
 _ZERO = [('h', 0.0, 'Saturation')]
+_BAND = (-SI_BAND, SI_BAND, f'SI = 0 $\\pm$ {SI_BAND}')
+
+
+def _si(x, mineral, **kw):
+    return dict(x=x, y=f'SI {mineral}', lines=_ZERO, band=_BAND, **kw)
+
+
+_NACL_LINES = [('h', 1.0, 'Halite dissolution (1:1)'), ('h', _sw('Na'), 'Seawater / rainfall (0.86)')]
+_NACL_NOTES = ['Above 1: silicate weathering or cation exchange',
+               'Below 0.86: Na lost (reverse exchange)']
 
 GALLERY = {
     'Major ions against Cl': [_ion_vs_cl(i) for i in ['Na', 'K', 'Ca', 'Mg', 'HCO3', 'SO4']],
     'Minor ions against Cl': [_ion_vs_cl(i) for i in ['Br', 'F', 'NO3', 'Sr', 'SiO2', 'Ba']],
     'Ion/Cl ratios against Cl': [
-        _ratio_vs_cl('Na/Cl', _sw('Na')), _ratio_vs_cl('K/Cl', _sw('K')),
+        dict(x='Cl (mmol/L)', y='Na/Cl', lines=_NACL_LINES, notes=_NACL_NOTES, xlog=True, include=True),
+        _ratio_vs_cl('K/Cl', _sw('K')),
         _ratio_vs_cl('Ca/Cl', _sw('Ca')), _ratio_vs_cl('Mg/Cl', _sw('Mg')),
         _ratio_vs_cl('SO4/Cl', _sw('SO4')), _ratio_vs_cl('HCO3/Cl', _sw('HCO3')),
-        _ratio_vs_cl('Cl/Br', 1.0 / _sw('Br')), _ratio_vs_cl('Sr/Cl', _sw('Sr')),
+        dict(x='Cl (mmol/L)', y='Cl/Br', lines=[('h', 1.0 / _sw('Br'), 'Seawater (~650)')], xlog=True, ylog=True,
+             include=True,
+             notes=['Rising with Cl: halite dissolution',
+                    'Flat with rising Cl: evaporation']),
+        _ratio_vs_cl('Sr/Cl', _sw('Sr')),
         _ratio_vs_cl('F/Cl', _sw('F')), _ratio_vs_cl('NO3/Cl'),
         _ratio_vs_cl('Ca/Mg', SEAWATER_MMOL['Ca'] / SEAWATER_MMOL['Mg']),
         _ratio_vs_cl('Na/K', SEAWATER_MMOL['Na'] / SEAWATER_MMOL['K']),
     ],
-    'Ratios against TDS': [
-        dict(x='TDS (mg/L)', y='Na/Cl', lines=[('h', _sw('Na'), 'Seawater'), ('h', 1.0, 'Halite')], xlog=True),
+    'Source of solutes': [
+        dict(x='TDS (mg/L)', y='Na/Cl', lines=_NACL_LINES, notes=_NACL_NOTES, xlog=True, include=True),
+        dict(x='Na/Cl', y='HCO3/sum anions (meq)', include=True,
+             lines=[('v', 1.0, 'Halite dissolution (Na/Cl = 1)'), ('v', _sw('Na'), 'Seawater / rainfall'),
+                    ('h', 0.5, None)],
+             notes=['High HCO$_3$, Na/Cl > 1: silicate weathering',
+                    'Low HCO$_3$, Na/Cl near 1: evaporites, marine salts']),
+        dict(x='TDS (mg/L)', y='Ca/Mg', xlog=True, include=True,
+             lines=[('h', 1.0, 'Dolomite (Ca/Mg = 1)'), ('h', 2.0, 'Above 2: calcite or silicates')]),
+        dict(x='TDS (mg/L)', y='HCO3/SiO2', xlog=True, ylog=True, include=True,
+             lines=[('h', 10.0, 'Above 10: carbonate weathering'), ('h', 5.0, 'Below 5: silicate weathering')]),
+        dict(x='TDS (mg/L)', y='Na/(Na+Cl) (meq)', xlog=True, include=True,
+             lines=[('h', 0.5, 'Halite (0.5)')],
+             notes=['> 0.5: other Na source (albite, ion exchange)',
+                    '< 0.5: reverse softening, seawater']),
+        dict(x='TDS (mg/L)', y='Ca/(Ca+SO4) (meq)', xlog=True, include=True,
+             lines=[('h', 0.5, 'Gypsum (0.5)')],
+             notes=['> 0.5: Ca from carbonates or silicates',
+                    '< 0.5: Ca removed (exchange, calcite)']),
+        dict(x='TDS (mg/L)', y='Mg/(Ca+Mg) (meq)', xlog=True, include=True,
+             lines=[('h', 0.5, 'Dolomite (0.5)')],
+             notes=['< 0.5: limestone-dolomite',
+                    '> 0.5: dolomite dissolution, calcite precipitation, or seawater']),
+        dict(x='TDS (mg/L)', y='SiO2/(Na+K-Cl) (mmol/meq)', xlog=True, include=True,
+             lines=[('h', 1.0, 'Below 1: cation exchange'), ('h', 2.0, 'Above 2: ferromagnesian minerals')],
+             notes=['1 to 2: albite weathering']),
         dict(x='TDS (mg/L)', y='HCO3/Cl', lines=[], xlog=True, ylog=True),
-        dict(x='TDS (mg/L)', y='Cl/Br', lines=[('h', 1.0 / _sw('Br'), 'Seawater')], xlog=True),
-        dict(x='TDS (mg/L)', y='Ca/Mg', lines=[('h', 1.0, 'Dolomite (1:1)')], xlog=True),
         dict(x='TDS (mg/L)', y='SO4/Cl', lines=[('h', _sw('SO4'), 'Seawater')], xlog=True, ylog=True),
-        dict(x='TDS (mg/L)', y='(Ca+Mg)/(HCO3+SO4)', lines=[('h', 1.0, '1:1')], xlog=True),
+        dict(x='TDS (mg/L)', y='Cl/Br', lines=[('h', 1.0 / _sw('Br'), 'Seawater (~650)')], xlog=True, ylog=True,
+             include=True),
+        dict(x='TDS (mg/L)', y='(Ca+Mg)/(HCO3+SO4)', lines=[('h', 1.0, '1:1')], xlog=True, include=True,
+             notes=['> 1: reverse exchange',
+                    '< 1: cation exchange (Ca, Mg lost)']),
+    ],
+    'Weathering end members (Gaillardet)': [
+        # end-member boxes from Gaillardet et al. (1999), molar ratios
+        dict(x='Ca/Na', y='HCO3/Na', xlog=True, ylog=True, include=True, lines=[],
+             boxes=[(0.08, 0.26, 0.05, 0.6, 'Evaporites'), (0.2, 0.5, 1.0, 3.0, 'Silicates'),
+                    (30, 70, 80, 160, 'Carbonates')]),
+        dict(x='Ca/Na', y='Mg/Na', xlog=True, ylog=True, include=True, lines=[],
+             boxes=[(0.08, 0.26, 0.01, 0.03, 'Evaporites'), (0.2, 0.5, 0.12, 0.36, 'Silicates'),
+                    (30, 70, 5, 15, 'Carbonates')]),
+    ],
+    'Gibbs (controls on chemistry)': [
+        dict(x='Na/(Na+Ca) (mg/L basis)', y='TDS (mg/L)', ylog=True, lines=[], gibbs=True),
+        dict(x='Cl/(Cl+HCO3) (mg/L basis)', y='TDS (mg/L)', ylog=True, lines=[], gibbs=True),
     ],
     'Water-rock processes': [
         dict(x='Cl (meq/L)', y='Na (meq/L)', lines=[('slope', 1.0, '1:1 (halite)'), ('slope', _sw('Na'), 'Seawater')]),
-        dict(x='HCO3+SO4 (meq/L)', y='Ca+Mg (meq/L)', lines=[('slope', 1.0, '1:1 (carbonate + gypsum)')]),
+        dict(x='HCO3+SO4 (meq/L)', y='Ca+Mg (meq/L)', lines=[('slope', 1.0, '1:1 (carbonate + gypsum)')],
+             notes=['Above: reverse exchange',
+                    'Below: cation exchange or silicate weathering']),
         dict(x='HCO3 (meq/L)', y='Ca+Mg (meq/L)', lines=[('slope', 1.0, '1:1 (carbonate dissolution)')]),
         dict(x='SO4 (meq/L)', y='Ca (meq/L)', lines=[('slope', 1.0, '1:1 (gypsum)')]),
         dict(x='HCO3 (meq/L)', y='Ca (meq/L)', lines=[('slope', 1.0, '1:1 (calcite)'), ('slope', 0.5, '1:2 (dolomite)')]),
         dict(x='Ca (mmol/L)', y='Mg (mmol/L)', lines=[('slope', 1.0, '1:1 (dolomite)')]),
         dict(x='Ca+Mg-HCO3-SO4 (meq/L)', y='Na+K-Cl (meq/L)', lines=[('slope', -1.0, 'Slope -1 (cation exchange)')], origin=True),
-        dict(x='Cl (mmol/L)', y='CAI-1', lines=[('h', 0.0, 'No exchange')], xlog=True),
+        dict(x='Cl (mmol/L)', y='CAI-1', lines=[('h', 0.0, 'No exchange')], xlog=True, include=True,
+             notes=['> 0: reverse exchange',
+                    '< 0: cation exchange']),
         dict(x='SO4 (meq/L)', y='Ca+Mg-HCO3 (meq/L)', lines=[('slope', 1.0, '1:1 (gypsum)')], origin=True),
         dict(x='SiO2 (mmol/L)', y='HCO3 (mmol/L)', lines=[]),
         dict(x='Na (mmol/L)', y='SiO2 (mmol/L)', lines=[]),
         dict(x='SiO2 (mmol/L)', y='Na+K-Cl (meq/L)', lines=[('h', 0.0, 'Na + K = Cl')]),
     ],
-    'Saturation indices against Cl': [
-        dict(x='Cl (mmol/L)', y=f'SI {m}', lines=_ZERO, xlog=True) for m in _SI_MAIN + _SI_MORE],
-    'Saturation indices against TDS': [
-        dict(x='TDS (mg/L)', y=f'SI {m}', lines=_ZERO, xlog=True) for m in _SI_MAIN + _SI_MORE],
-    'Saturation indices against pH': [
-        dict(x='pH', y=f'SI {m}', lines=_ZERO) for m in _SI_MAIN + _SI_MORE],
+    'Saturation indices against TDS': [_si('TDS (mg/L)', m, xlog=True, include=True) for m in _SI_ALL],
+    'Saturation indices against Cl': [_si('Cl (mmol/L)', m, xlog=True, include=True) for m in _SI_ALL],
+    'Saturation indices against pH': [_si('pH', m, include=True) for m in _SI_ALL],
+    'Saturation indices against their own ions': [
+        _si('Ca (mmol/L)', 'Calcite', xlog=True, include=True), _si('HCO3 (mmol/L)', 'Calcite', xlog=True, include=True),
+        _si('Mg (mmol/L)', 'Dolomite', xlog=True, include=True), _si('Ca/Mg', 'Dolomite', xlog=True, include=True),
+        _si('SO4 (mmol/L)', 'Gypsum', xlog=True, include=True), _si('Ca (mmol/L)', 'Gypsum', xlog=True, include=True),
+        _si('F (mmol/L)', 'Fluorite', xlog=True, include=True), _si('Ca (mmol/L)', 'Fluorite', xlog=True, include=True),
+        _si('SiO2 (mmol/L)', 'Chalcedony', xlog=True, include=True), _si('SiO2 (mmol/L)', 'Quartz', xlog=True, include=True),
+        _si('Ba (mmol/L)', 'Barite', xlog=True, include=True), _si('Sr (mmol/L)', 'Celestite', xlog=True, include=True),
+    ],
+    'Saturation indices against each other': [
+        dict(x='SI Calcite', y='SI Dolomite', lines=[('h', 0.0, None), ('v', 0.0, None), ('slope', 2.0, '2:1')],
+             origin=True, include=True),
+        dict(x='SI Gypsum', y='SI Calcite', lines=[('h', 0.0, None), ('v', 0.0, None)], include=True,
+             notes=['Calcite near 0 while gypsum rises: dedolomitisation']),
+        dict(x='SI Gypsum', y='SI Dolomite', lines=[('h', 0.0, None), ('v', 0.0, None)], include=True),
+        dict(x='SI Calcite', y='SI Aragonite', lines=[('h', 0.0, None), ('v', 0.0, None)], include=True),
+        dict(x='SI Gypsum', y='SI Anhydrite', lines=[('h', 0.0, None), ('v', 0.0, None)], include=True),
+        dict(x='SI Chalcedony', y='SI Quartz', lines=[('h', 0.0, None), ('v', 0.0, None)], include=True),
+    ],
     'Carbonate system': [
-        dict(x='pH', y='log pCO2', lines=[('h', -3.38, 'Atmosphere (~420 ppm)')]),
-        dict(x='log pCO2', y='SI Calcite', lines=_ZERO),
-        dict(x='SI Calcite', y='SI Dolomite', lines=[('h', 0.0, None), ('v', 0.0, None)]),
-        dict(x='HCO3 (mmol/L)', y='SI Calcite', lines=_ZERO),
-        dict(x='Ca (mmol/L)', y='SI Calcite', lines=_ZERO),
-        dict(x='SI Gypsum', y='SI Calcite', lines=[('h', 0.0, None), ('v', 0.0, None)]),
+        dict(x='pH', y='log pCO2', lines=[('h', -3.38, 'Atmosphere (~420 ppm)'), ('h', -1.5, 'Typical soil zone (-1.5)')],
+             include=True),
+        _si('log pCO2', 'Calcite', include=True),
+        _si('log pCO2', 'Dolomite', include=True),
+        dict(x='HCO3 (mmol/L)', y='log pCO2', lines=[('h', -3.38, 'Atmosphere')], include=True),
+        _si('HCO3 (mmol/L)', 'Calcite', include=True),
+        dict(x='TDS (mg/L)', y='log pCO2', lines=[('h', -3.38, 'Atmosphere')], xlog=True, include=True),
+    ],
+    'Irrigation quality': [
+        dict(x='EC', y='SAR', lines=[('h', 10.0, 'S1/S2 at low EC (10)'), ('h', 18.0, 'S2/S3 (18)'), ('h', 26.0, 'S3/S4 (26)')],
+             xlog=True),
+        dict(x='EC', y='Na (%)', lines=[('h', 60.0, '60 %')], xlog=True, include=True),
+        dict(x='TDS (mg/L)', y='SAR', lines=[], xlog=True),
     ],
     'Quality checks': [
-        dict(x='TDS (mg/L)', y='CBE (%)', lines=[('h', 5.0, '+/- 5 %'), ('h', -5.0, None)], xlog=True),
+        dict(x='TDS (mg/L)', y='CBE (%)', lines=[('h', 5.0, '+/- 5 %'), ('h', -5.0, None)], xlog=True, include=True),
         dict(x='Sum anions (meq/L)', y='Sum cations (meq/L)', lines=[('slope', 1.0, '1:1')]),
         dict(x='TDS calc (mg/L)', y='TDS (mg/L)', lines=[('slope', 1.0, '1:1')]),
         dict(x='EC', y='TDS (mg/L)', lines=[('slope', 0.55, 'TDS = 0.55 EC'), ('slope', 0.75, 'TDS = 0.75 EC')]),
@@ -525,7 +609,39 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
             ax.set_ylim(bottom=0)
     ax.margins(0.08)
     ax.autoscale_view()
-    xl, yl = ax.get_xlim(), ax.get_ylim()
+    xl, yl = list(ax.get_xlim()), list(ax.get_ylim())
+    # stretch the limits so the reference lines and boxes are in view
+    if panel.get('include', False):
+        ys = [l[1] for l in panel.get('lines', []) if l[0] == 'h']
+        xv = [l[1] for l in panel.get('lines', []) if l[0] == 'v']
+        if 'band' in panel:
+            ys += list(panel['band'][:2])
+        for bx in panel.get('boxes', []):
+            xv += [bx[0], bx[1]]
+            ys += [bx[2], bx[3]]
+        for vals, lim, log in [(xv, xl, xlog), (ys, yl, ylog)]:
+            if vals:
+                lo, hi = min(vals), max(vals)
+                if log:
+                    lim[0], lim[1] = min(lim[0], lo / 1.5), max(lim[1], hi * 1.5)
+                else:
+                    pad = 0.06 * (max(lim[1], hi) - min(lim[0], lo))
+                    lim[0], lim[1] = min(lim[0], lo - pad), max(lim[1], hi + pad)
+    if panel.get('gibbs', False):
+        xl = [0, 1]
+        yl = [min(yl[0], 5), max(yl[1], 50000)]
+        for fx, fy, txt in [(0.97, 0.08, 'Precipitation\ndominance'), (0.03, 0.5, 'Rock\ndominance'),
+                            (0.97, 0.92, 'Evaporation\ndominance')]:
+            ax.text(fx, fy, txt, transform=ax.transAxes, fontsize=6, color='0.35', style='italic',
+                    ha='right' if fx > 0.5 else 'left', va='center', zorder=2)
+    if 'band' in panel:
+        ax.axhspan(panel['band'][0], panel['band'][1], color='0.85', alpha=0.6, lw=0, zorder=0,
+                   label=panel['band'][2])
+    for bx in panel.get('boxes', []):
+        ax.fill([bx[0], bx[1], bx[1], bx[0]], [bx[2], bx[2], bx[3], bx[3]], facecolor='0.85',
+                edgecolor='0.4', lw=0.6, alpha=0.6, zorder=0)
+        mid = np.sqrt(bx[0] * bx[1]) if xlog else 0.5 * (bx[0] + bx[1])
+        ax.text(mid, bx[2], bx[4], fontsize=6, color='0.3', ha='center', va='top', zorder=2)
     xs = np.geomspace(max(xl[0], 1e-12), xl[1], 50) if xlog else np.linspace(xl[0], xl[1], 50)
 
     k = 0
@@ -549,10 +665,21 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
 
     ax.set_xlabel(pretty(panel['x']) + (' (molar)' if '/' in panel['x'] and '(' not in panel['x'] else ''))
     ax.set_ylabel(pretty(panel['y']) + (' (molar)' if '/' in panel['y'] and '(' not in panel['y'] else ''))
+    # plain numbers on log axes
+    for axis, log, lim in [(ax.xaxis, xlog, xl), (ax.yaxis, ylog, yl)]:
+        if log:
+            axis.set_major_formatter(FuncFormatter(lambda val, pos: f'{val:g}'))
+            if lim[0] > 0 and np.log10(lim[1] / lim[0]) < 1.2:
+                axis.set_minor_formatter(FuncFormatter(
+                    lambda val, pos: f'{val:g}' if str(f'{val:e}')[0] in '25' else ''))
+            else:
+                axis.set_minor_formatter(NullFormatter())
     handles, labels = ax.get_legend_handles_labels()
     keep = [(h_, l_) for h_, l_ in zip(handles, labels) if l_ and not l_.startswith('_')]
+    # interpretation notes go in the legend as text-only lines
+    keep += [(Line2D([], [], ls='', marker=''), n) for n in panel.get('notes', [])]
     if keep:
-        ax.legend(*zip(*keep), frameon=False, fontsize=6, loc='best', handlelength=2.2)
+        ax.legend(*zip(*keep), frameon=False, fontsize=6, loc='best', handlelength=2.2, labelspacing=0.3)
     return mappable, hollow & ok
 
 
@@ -569,8 +696,8 @@ def gallery_page(v, panels, log_conc=False, color_by=None):
     with matplotlib.rc_context(STYLE):
         fig = Figure(figsize=(17 * CM, height * CM), dpi=150)
         axs = np.atleast_1d(fig.subplots(nrows, 2)).ravel()
-        fig.subplots_adjust(left=0.09, right=0.86 if color_by else 0.98, top=1 - 0.3 / height,
-                            bottom=2.2 / height, hspace=0.42, wspace=0.28)
+        fig.subplots_adjust(left=0.1, right=0.86 if color_by else 0.98, top=1 - 0.3 / height,
+                            bottom=2.2 / height, hspace=0.42, wspace=0.3)
         any_hollow = False
         mappable = None
         for ax, p in zip(axs, panels):

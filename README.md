@@ -1,4 +1,6 @@
-# hydrochem-workbench
+# Hydrochem Workbench
+
+https://hydrochem-workbench.streamlit.app/
 
 Upload a hydrochemistry spreadsheet, run every sample through PHREEQC, and get
 the plots a hydrogeochemist makes first. Built to sit alongside HydroSILO and
@@ -31,9 +33,13 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    - Piper, in the coloured-field style from `PiperScript.py`
    - Schoeller and Stiff, native, same style
    - Durov, Gibbs, Chadha and HFE-D passed through from WQChartPy as is
-   - Diagnostic gallery (about 80 panels in 10 sets): ions against Cl, ion/Cl
-     ratios, ratios against TDS, water-rock process plots, saturation indices
-     against Cl, TDS and pH, the carbonate system, and quality checks
+   - Diagnostic gallery (about 120 panels in 15 sets), with reference lines,
+     shaded near-equilibrium bands and interpretation notes: ions and ion/Cl
+     ratios against Cl, source-of-solute ratios (Na/Cl against TDS, HCO3
+     fraction against Na/Cl, Hounslow-style ratios), Gaillardet end-member
+     diagrams, Gibbs, water-rock process plots, saturation indices against
+     TDS, Cl, pH, their own ions and each other, the carbonate system,
+     irrigation quality (SAR, percent Na) and quality checks
    - Custom plot: any variable against any other
 5. **Export.** Results table with every derived variable and the settings used;
    a zip of all figures.
@@ -59,6 +65,7 @@ usage statistics.
     core/chem.py      template, cleaning, units, fill rules, PHREEQC, derived table
     core/plots.py     all figures
     core/usage.py     the usage counter
+    logo/             hex badge (svg, png) and favicon
     tests/            pytest: chemistry checks and a headless run of the app
 
 `core/` has no Streamlit in it and can be used from Spyder directly.
@@ -79,6 +86,13 @@ You are free to use, modify and share it; if you distribute a modified version
 you must release its source under the GPL as well. There is no warranty: the
 outputs are an aid to interpretation and should be checked before they are
 relied on.
+
+## How to cite
+
+Irvine, D. (2026). Hydrochem Workbench (version 0.3) [Web application].
+Charles Darwin University. https://hydrochem-workbench.streamlit.app/
+
+Please also cite PHREEQC and WQChartPy (below).
 
 ## Credits and third-party software
 

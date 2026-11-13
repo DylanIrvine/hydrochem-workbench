@@ -7,7 +7,7 @@
 # version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
 
 # app.py
-# HydroCHEM: hydrochemistry plots and PHREEQC saturation indices
+# Hydrochem Workbench: hydrochemistry plots and PHREEQC saturation indices
 #
 # to run: streamlit run app.py
 #
@@ -29,8 +29,9 @@ from core import chem, plots
 from core.usage import increment as _record_use, status as _usage_status
 
 # %% CONFIG
-APP_NAME = 'HydroCHEM'
-APP_VERSION = '0.2'
+APP_NAME = 'Hydrochem Workbench'
+APP_URL = 'https://hydrochem-workbench.streamlit.app/'
+APP_VERSION = '0.3'
 PANELS_PER_PAGE = 6
 DEFAULT_PH = 7.0
 DEFAULT_TEMP = 25.0
@@ -38,13 +39,21 @@ DEFAULT_HCO3_MMOL = 2.0
 MAX_STIFF = 24
 
 # theme (dark, red) is set in .streamlit/config.toml
-st.set_page_config(page_title=APP_NAME, layout='centered')
-st.title(APP_NAME)
-st.caption(f'Version {APP_VERSION}')
+st.set_page_config(page_title=APP_NAME, page_icon='logo/favicon.png', layout='centered')
+
+# %% header
+head_text, head_logo = st.columns([3, 1], vertical_alignment='center')
+with head_text:
+    st.title(APP_NAME)
+    st.subheader('Hydrochemistry plots and PHREEQC saturation indices')
+    st.write('Dylan Irvine, Charles Darwin University.')
+    st.caption(f'Version {APP_VERSION}')
+with head_logo:
+    st.image('logo/hydrochem_badge.png', width='stretch')
 
 # %% intro
 st.write(
-    'HydroCHEM takes a spreadsheet of water chemistry, runs every sample through PHREEQC, and draws '
+    'The Hydrochem Workbench takes a spreadsheet of water chemistry, runs every sample through PHREEQC, and draws '
     'the plots a hydrogeochemist would make first. Download the template from the sidebar, paste '
     'your data in (one row per sample, one unit for every ion), choose the unit and upload it.\n\n'
     'What comes back: charge balance, water type, saturation indices and pCO2, a Piper diagram, the '
@@ -135,7 +144,10 @@ with st.expander('**Privacy and data handling**'):
 # %% citations
 with st.expander('**How to cite and references**'):
     st.markdown(
-        'If you use output from this app, please cite the software it is built on.\n\n'
+        '**This app**\n\n'
+        f'Irvine, D.J. (2026). Hydrochem Workbench (version 0.3) [Web application]. '
+        f'Charles Darwin University. https://hydrochem-workbench.streamlit.app/\n\n'
+        'Please also cite the software it is built on.\n\n'
         '**Geochemical calculations (PHREEQC)**\n\n'
         'Parkhurst, D.L. and Appelo, C.A.J. (2013). Description of input and examples for PHREEQC '
         'version 3: a computer program for speciation, batch-reaction, one-dimensional transport, '
@@ -161,6 +173,13 @@ with st.expander('**How to cite and references**'):
         'Chadha, D.K. (1999). A proposed new diagram for geochemical classification of natural '
         'waters and interpretation of chemical data. Hydrogeology Journal, 7, 431-439. '
         'https://doi.org/10.1007/s100400050216\n\n'
+        'Gaillardet, J., Dupre, B., Louvat, P. and Allegre, C.J. (1999). Global silicate weathering '
+        'and CO2 consumption rates deduced from the chemistry of large rivers. Chemical Geology, '
+        '159, 3-30. https://doi.org/10.1016/S0009-2541(99)00031-5\n\n'
+        'Hounslow, A.W. (1995). Water quality data: analysis and interpretation. CRC Lewis '
+        'Publishers, Boca Raton. (Source of the source-rock ratio thresholds.)\n\n'
+        'Richards, L.A. (ed.) (1954). Diagnosis and improvement of saline and alkali soils. USDA '
+        'Agriculture Handbook 60. (Sodium adsorption ratio.)\n\n'
         'Gimenez-Forcada, E. (2010). Dynamic of sea water interface using hydrochemical facies '
         'evolution diagram. Groundwater, 48(2), 212-216. '
         'https://doi.org/10.1111/j.1745-6584.2009.00649.x')
@@ -206,7 +225,7 @@ def show(fig, name, key):
 with st.sidebar:
     st.header('1. Data')
     st.download_button('Download the template', chem.template_bytes(),
-                       file_name='HydroCHEM_template.xlsx',
+                       file_name='hydrochem_workbench_template.xlsx',
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     uploaded = st.file_uploader('Upload the filled template', type=['xlsx', 'csv'])
     use_example = st.checkbox('Use the synthetic example data', value=False,
@@ -359,8 +378,9 @@ if view == 'Diagnostic gallery':
              f'dl_gallery_{k}')
     if skipped:
         st.caption(f'{skipped} panel(s) skipped because the data do not include those variables.')
-    st.caption('Ratios are molar. Seawater lines use standard mean seawater. Reference lines are '
-               'guides to interpretation, not fitted to the data.')
+    st.caption('Ratios are molar unless the label says meq. Seawater lines use standard mean seawater. '
+               'Reference lines, shaded bands and the notes in the legends are guides to interpretation, '
+               'not fitted to the data: check them against what you know of the geology.')
 
 # %% view: custom
 if view == 'Custom plot':
@@ -396,7 +416,7 @@ if view == 'Export':
         settings.to_excel(xl, sheet_name='Settings', index=False)
         if n_dropped:
             dropped.astype(str).to_excel(xl, sheet_name='Cells treated as missing', index=False)
-    st.download_button('Download results (.xlsx)', buf.getvalue(), file_name='HydroCHEM_results.xlsx',
+    st.download_button('Download results (.xlsx)', buf.getvalue(), file_name='hydrochem_workbench_results.xlsx',
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     st.caption('Every derived variable, saturation index and flag, plus the settings used, so the '
                'run can be reproduced.')
@@ -414,5 +434,5 @@ if view == 'Export':
                     f = plots.gallery_page(v, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc)
                     fname = gname.lower().replace(' ', '_').replace('/', '-')
                     z.writestr(f'gallery/{fname}_{k // PANELS_PER_PAGE + 1}.png', plots.fig_png(f, dpi))
-        st.download_button('Download figures (.zip)', zbuf.getvalue(), file_name='HydroCHEM_figures.zip',
+        st.download_button('Download figures (.zip)', zbuf.getvalue(), file_name='hydrochem_workbench_figures.zip',
                            mime='application/zip')

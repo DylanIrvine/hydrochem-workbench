@@ -445,6 +445,19 @@ def build_table(df, mmol, filled, phreeqc, extra_cols):
     v['Ca+Mg-HCO3-SO4 (meq/L)'] = meq['Ca'] + meq['Mg'] - meq['HCO3'] - meq['SO4']
     v['Ca+Mg-HCO3 (meq/L)'] = meq['Ca'] + meq['Mg'] - meq['HCO3']
     v['(Ca+Mg)/(HCO3+SO4)'] = _ratio(meq['Ca'] + meq['Mg'], meq['HCO3'] + meq['SO4'])
+    # source-rock style ratios (after Hounslow, 1995)
+    v['HCO3/sum anions (meq)'] = _ratio(meq['HCO3'], meq['HCO3'] + meq['CO3'].fillna(0) + meq['Cl'] + meq['SO4'])
+    v['Na/(Na+Cl) (meq)'] = _ratio(meq['Na'], meq['Na'] + meq['Cl'])
+    v['Ca/(Ca+SO4) (meq)'] = _ratio(meq['Ca'], meq['Ca'] + meq['SO4'])
+    v['Mg/(Ca+Mg) (meq)'] = _ratio(meq['Mg'], meq['Ca'] + meq['Mg'])
+    v['SiO2/(Na+K-Cl) (mmol/meq)'] = _ratio(mmol['SiO2'], meq['Na'] + k0 - meq['Cl'])
+    # Na-normalised ratios for the Gaillardet mixing diagrams
+    v['Ca/Na'] = _ratio(mmol['Ca'], mmol['Na'])
+    v['Mg/Na'] = _ratio(mmol['Mg'], mmol['Na'])
+    v['HCO3/Na'] = _ratio(mmol['HCO3'], mmol['Na'])
+    # irrigation: sodium adsorption ratio and percent sodium (meq)
+    v['SAR'] = meq['Na'] / np.sqrt((meq['Ca'] + meq['Mg']) / 2).where(lambda z: z > 0)
+    v['Na (%)'] = _ratio(meq['Na'] + k0, meq['Ca'] + meq['Mg'] + meq['Na'] + k0) * 100
     # chloro-alkaline index (CAI-1)
     v['CAI-1'] = _ratio(meq['Cl'] - (meq['Na'] + k0), meq['Cl'])
     # Gibbs ratios use mg/L
