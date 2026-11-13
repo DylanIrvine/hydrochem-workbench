@@ -31,11 +31,11 @@ from core.usage import increment as _record_use, status as _usage_status
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.3'
+APP_VERSION = '0.4'
 PANELS_PER_PAGE = 6
 DEFAULT_PH = 7.0
 DEFAULT_TEMP = 25.0
-DEFAULT_HCO3_MMOL = 2.0
+DEFAULT_ALK = 100.0   # mg/L as CaCO3
 MAX_STIFF = 24
 
 # theme (dark, red) is set in .streamlit/config.toml
@@ -55,7 +55,8 @@ with head_logo:
 st.write(
     'The Hydrochem Workbench takes a spreadsheet of water chemistry, runs every sample through PHREEQC, and draws '
     'the plots a hydrogeochemist would make first. Download the template from the sidebar, paste '
-    'your data in (one row per sample, one unit for every ion), choose the unit and upload it.\n\n'
+    'your data in (one row per sample, one unit for every ion, alkalinity as CaCO3 straight from '
+    'the lab report), choose the unit and upload it.\n\n'
     'What comes back: charge balance, water type, saturation indices and pCO2, a Piper diagram, the '
     'classical diagrams, a gallery of diagnostic ion, ratio and saturation-index plots with '
     'reference lines, and a builder for any plot the gallery does not have. The database is '
@@ -145,8 +146,8 @@ with st.expander('**Privacy and data handling**'):
 with st.expander('**How to cite and references**'):
     st.markdown(
         '**This app**\n\n'
-        f'Irvine, D.J. (2026). Hydrochem Workbench (version 0.3) [Web application]. '
-        f'Charles Darwin University. https://hydrochem-workbench.streamlit.app/\n\n'
+        f'Irvine, D. (2026). Hydrochem Workbench (version {APP_VERSION}) [Web application]. '
+        f'Charles Darwin University. {APP_URL}\n\n'
         'Please also cite the software it is built on.\n\n'
         '**Geochemical calculations (PHREEQC)**\n\n'
         'Parkhurst, D.L. and Appelo, C.A.J. (2013). Description of input and examples for PHREEQC '
@@ -193,10 +194,10 @@ def get_phreeqc():
     return phreeqpython.PhreeqPython(database='phreeqc.dat')
 
 
-def process(raw, unit, alk_as_caco3, no3_as_n, rules):
+def process(raw, unit, no3_as_n, rules):
     # clean, convert, fill, run PHREEQC
     # results are kept in session_state (not st.cache_data) so nothing is held after the user leaves
-    key = hashlib.sha1((raw.to_csv() + repr((unit, alk_as_caco3, no3_as_n, rules))).encode()).hexdigest()
+    key = hashlib.sha1((raw.to_csv() + repr((unit, no3_as_n, rules))).encode()).hexdigest()
     cached = st.session_state.get('result')
     if cached is not None and cached[0] == key:
         return cached[1]
@@ -207,10 +208,10 @@ def process(raw, unit, alk_as_caco3, no3_as_n, rules):
         if any(not p.startswith('Duplicate') for p in problems):
             out = (None, dropped, None, problems)
         else:
-            mmol = chem.to_mmol(df, unit, alk_as_caco3, no3_as_n)
+            mmol, alk_source = chem.to_mmol(df, unit, no3_as_n)
             df, mmol, filled = chem.fill_missing(df, mmol, dict(rules))
-            phreeqc, errors = chem.run_phreeqc(df, mmol, get_phreeqc())
-            out = (chem.build_table(df, mmol, filled, phreeqc, extra_cols), dropped, errors, problems)
+            phreeqc, errors, mmol = chem.run_phreeqc(df, mmol, get_phreeqc())
+            out = (chem.build_table(df, mmol, filled, phreeqc, extra_cols, alk_source), dropped, errors, problems)
     st.session_state['result'] = (key, out)
     return out
 
@@ -232,19 +233,21 @@ with st.sidebar:
                               help='Made-up samples for trying the app. Not real data.')
 
     st.header('2. Units')
-    unit = st.selectbox('Concentration unit (all ions)', chem.UNITS, index=0)
-    alk_choice = st.selectbox('HCO3 column holds', ['Bicarbonate as HCO3', 'Total alkalinity as CaCO3'])
+    unit = st.selectbox('Concentration unit (ion columns)', chem.UNITS, index=0)
+    st.caption('**Alkalinity** goes in as it appears on the lab report: total alkalinity, or '
+               'bicarbonate and carbonate alkalinity, in mg/L as CaCO3 (whatever unit the ions are '
+               'in). Do not convert it. HCO3 and CO3 are calculated by PHREEQC from alkalinity and pH.')
     no3_choice = st.selectbox('NO3 column holds', ['Nitrate as NO3', 'Nitrate as N'])
 
     st.header('3. Missing values')
-    st.caption('Missing pH, temperature and bicarbonate are filled so every sample can be '
+    st.caption('Missing pH, temperature and alkalinity are filled so every sample can be '
                'speciated. Filled samples are drawn hollow wherever the fill affects the plot.')
     ph_how = st.selectbox('Missing pH', ['Mean of the dataset', 'Fixed value'])
     ph_val = st.number_input('Fixed pH', value=DEFAULT_PH, step=0.1) if ph_how == 'Fixed value' else DEFAULT_PH
     t_how = st.selectbox('Missing temperature', ['Mean of the dataset', 'Fixed value'])
     t_val = st.number_input('Fixed temperature (deg C)', value=DEFAULT_TEMP, step=0.5) if t_how == 'Fixed value' else DEFAULT_TEMP
-    h_how = st.selectbox('Missing HCO3', ['Mean of the dataset', 'From charge balance', 'Fixed value'])
-    h_val = st.number_input('Fixed HCO3 (mmol/L)', value=DEFAULT_HCO3_MMOL, step=0.1) if h_how == 'Fixed value' else DEFAULT_HCO3_MMOL
+    h_how = st.selectbox('Missing alkalinity', ['Mean of the dataset', 'From charge balance', 'Fixed value'])
+    h_val = st.number_input('Fixed alkalinity (mg/L as CaCO3)', value=DEFAULT_ALK, step=10.0) if h_how == 'Fixed value' else DEFAULT_ALK
 
     st.header('4. Plot options')
     log_conc = st.checkbox('Log axes on concentration plots', value=False,
@@ -267,8 +270,7 @@ else:
     st.info('Upload a filled template, or tick the synthetic example in the sidebar, to begin.')
     st.stop()
 
-v, dropped, errors, problems = process(raw, unit, alk_choice.startswith('Total'),
-                                       no3_choice.endswith('as N'), rules)
+v, dropped, errors, problems = process(raw, unit, no3_choice.endswith('as N'), rules)
 for p in problems:
     st.error(p)
 if v is None:
@@ -292,7 +294,7 @@ if saline.any():
                'the right tool.')
 n_filled = int((v['Filled'] != '').sum())
 if n_filled:
-    st.info(f'{n_filled} sample(s) had a missing pH, temperature or HCO3 filled. They are hollow on '
+    st.info(f'{n_filled} sample(s) had a missing pH, temperature or alkalinity filled. They are hollow on '
             'the plots where the fill matters. Remove those rows and re-upload if you would rather '
             'not show them.')
 if errors is not None and len(errors):
@@ -312,11 +314,14 @@ if view == 'Data and checks':
     c3.metric('Charge balance within 5 %', f'{int(cbe_ok)} of {int(v["CBE (%)"].notna().sum())}')
     c4.metric('Filled samples', n_filled)
 
-    summary_cols = ['Sample', 'Label', 'Water type', 'CBE (%)', 'TDS (mg/L)', 'pH', 'log pCO2',
+    summary_cols = ['Sample', 'Label', 'Water type', 'CBE (%)', 'TDS (mg/L)', 'pH',
+                    'Alkalinity (mg/L as CaCO3)', 'HCO3 (mg/L)', 'CO3 (mg/L)', 'log pCO2',
                     'Ionic strength (mol/kgw)'] + [c for c in v.columns if c.startswith('SI ') and v[c].notna().any()] + ['Filled']
     st.subheader('Summary')
     st.dataframe(v[summary_cols].round(3), use_container_width=True, hide_index=True)
-    st.caption('CBE is signed: positive means excess cations. TDS is the measured value where '
+    st.caption('HCO3 and CO3 are calculated by PHREEQC from the alkalinity and pH you supplied '
+               '(each includes its ion pairs, so HCO3 + CO3 adds up to the carbonate alkalinity). '
+               'CBE is signed: positive means excess cations. TDS is the measured value where '
                'given, otherwise the sum of ions with bicarbonate x 0.4917.')
 
     if n_dropped:
@@ -404,12 +409,12 @@ if view == 'Custom plot':
 if view == 'Export':
     st.subheader('Results table')
     out_cols = [c for c in v.columns if not c.startswith('piper_') and c not in ('Color', 'Marker')]
-    settings = pd.DataFrame({'Setting': ['App version', 'Database', 'Input unit', 'HCO3 column', 'NO3 column',
-                                         'Missing pH', 'Missing temperature', 'Missing HCO3'],
-                             'Value': [APP_VERSION, 'phreeqc.dat (phreeqpython)', unit, alk_choice, no3_choice,
+    settings = pd.DataFrame({'Setting': ['App version', 'Database', 'Input unit', 'Alkalinity', 'NO3 column',
+                                         'Missing pH', 'Missing temperature', 'Missing alkalinity'],
+                             'Value': [APP_VERSION, 'phreeqc.dat (phreeqpython)', unit, 'mg/L as CaCO3; HCO3 and CO3 from PHREEQC (see "Alkalinity from" column)', no3_choice,
                                        ph_how + (f' ({ph_val})' if ph_how == 'Fixed value' else ''),
                                        t_how + (f' ({t_val})' if t_how == 'Fixed value' else ''),
-                                       h_how + (f' ({h_val} mmol/L)' if h_how == 'Fixed value' else '')]})
+                                       h_how + (f' ({h_val} mg/L as CaCO3)' if h_how == 'Fixed value' else '')]})
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as xl:
         v[out_cols].to_excel(xl, sheet_name='Results', index=False)

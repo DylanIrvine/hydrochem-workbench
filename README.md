@@ -17,11 +17,13 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
 ## What it does
 
 1. **Template in.** One row per sample, one unit for every ion (mg/L, mmol/L or
-   meq/L, chosen in the app). Two "reported as" switches: HCO3 or alkalinity as
-   CaCO3, and nitrate as NO3 or as N. Any extra numeric column (depth, isotopes)
-   is carried through and can be plotted.
-2. **Missing values.** Missing pH, temperature and HCO3 are filled (dataset
-   mean, a fixed value, or for HCO3 the charge-balance value). Filled samples
+   meq/L, chosen in the app). Alkalinity goes in as the lab reports it, in mg/L
+   as CaCO3: total alkalinity, or bicarbonate and carbonate alkalinity. HCO3 and
+   CO3 are not inputs. PHREEQC calculates both from alkalinity and pH, and those
+   values are used in every plot. Nitrate can be as NO3 or as N. Any extra
+   numeric column (depth, isotopes) is carried through and can be plotted.
+2. **Missing values.** Missing pH, temperature and alkalinity are filled (dataset
+   mean, a fixed value, or for alkalinity the charge-balance value). Filled samples
    are drawn hollow, but only on plots the fill actually affects. Text cells
    such as `<0.05` are dropped and listed; dealing with them is the user's job.
 3. **PHREEQC.** `phreeqpython` with `phreeqc.dat`. Saturation indices for
@@ -89,7 +91,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D. (2026). Hydrochem Workbench (version 0.3) [Web application].
+Irvine, D. (2026). Hydrochem Workbench (version 0.4) [Web application].
 Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).

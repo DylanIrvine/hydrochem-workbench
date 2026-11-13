@@ -23,7 +23,7 @@ def test_app_runs_on_example_data(tmp_path, monkeypatch):
         assert not at.exception
 
     for label in ['From charge balance', 'Fixed value']:
-        [s for s in at.selectbox if s.label == 'Missing HCO3'][0].select(label).run()
+        [s for s in at.selectbox if s.label == 'Missing alkalinity'][0].select(label).run()
         assert not at.exception
     go('Piper')
     go('Classical diagrams')

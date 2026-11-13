@@ -15,12 +15,12 @@ def one_sample(**kw):
 
 def run(raw, unit='mg/L', rules=None, **kw):
     import phreeqpython
-    rules = rules or {'pH': ('mean', 7), 'Temp': ('mean', 25), 'HCO3': ('mean', 2)}
+    rules = rules or {'pH': ('mean', 7), 'Temp': ('mean', 25), 'HCO3': ('mean', 100)}
     df, dropped, extra, problems = chem.clean(raw)
-    mmol = chem.to_mmol(df, unit, **kw)
+    mmol, source = chem.to_mmol(df, unit, **kw)
     df, mmol, filled = chem.fill_missing(df, mmol, rules)
-    ph, err = chem.run_phreeqc(df, mmol, phreeqpython.PhreeqPython(database='phreeqc.dat'))
-    return chem.build_table(df, mmol, filled, ph, extra), dropped
+    ph, err, mmol = chem.run_phreeqc(df, mmol, phreeqpython.PhreeqPython(database='phreeqc.dat'))
+    return chem.build_table(df, mmol, filled, ph, extra, source), dropped
 
 
 def test_units_agree():
@@ -31,16 +31,37 @@ def test_units_agree():
     for t in (a, b, c):
         assert t.at[0, 'Ca (mmol/L)'] == pytest.approx(1.0, rel=1e-6)
         assert t.at[0, 'Ca (meq/L)'] == pytest.approx(2.0, rel=1e-6)
-        assert t.at[0, 'CBE (%)'] == pytest.approx(0.0, abs=1e-4)
+        assert t.at[0, 'CBE (%)'] == pytest.approx(0.0, abs=0.05)
     assert a.at[0, 'SI Calcite'] == pytest.approx(b.at[0, 'SI Calcite'], abs=1e-4)
 
 
-def test_alkalinity_as_caco3_and_nitrate_as_n():
-    # 100 mg/L as CaCO3 = 2 meq/L = 121.9 mg/L HCO3; 10 mg/L NO3-N = 44.27 mg/L NO3
-    t, _ = run(one_sample(pH=7, Temp=25, Ca=40, Mg=1, Na=1, K=1, HCO3=100, Cl=1, SO4=1, NO3=10),
-               'mg/L', alk_as_caco3=True, no3_as_n=True)
-    assert t.at[0, 'HCO3 (meq/L)'] == pytest.approx(2.0, rel=2e-3)
-    assert t.at[0, 'NO3 (mg/L)'] == pytest.approx(44.27, rel=1e-3)
+def test_alkalinity_columns_and_nitrate_as_n():
+    # 100 mg/L as CaCO3 = 2 meq/L, entered as total or as bicarbonate + carbonate
+    base = dict(pH=7.5, Temp=25, Ca=40, Mg=1, Na=1, K=1, Cl=1, SO4=1)
+    a, _ = run(one_sample(Total_Alk_CaCO3=100, NO3=10, **base), 'mg/L', no3_as_n=True)
+    b, _ = run(one_sample(Bicarb_Alk_CaCO3=80, Carb_Alk_CaCO3=20, **base), 'mg/L')
+    for t in (a, b):
+        assert t.at[0, 'Alkalinity (meq/L)'] == pytest.approx(1.998, rel=1e-3)
+    assert a.at[0, 'Alkalinity from'] == 'Total alkalinity'
+    assert b.at[0, 'Alkalinity from'] == 'Bicarbonate + carbonate alkalinity'
+    assert a.at[0, 'NO3 (mg/L)'] == pytest.approx(44.27, rel=1e-3)
+    # the alkalinity columns are mg/L as CaCO3 even when the ions are in meq/L
+    c, _ = run(one_sample(pH=7.5, Temp=25, Ca=2, Mg=0.1, Na=0.1, K=0.1, Cl=0.1, SO4=0.1,
+                          Total_Alk_CaCO3=100), 'meq/L')
+    assert c.at[0, 'Alkalinity (meq/L)'] == pytest.approx(1.998, rel=1e-3)
+
+
+def test_hco3_and_co3_come_from_phreeqc():
+    # same alkalinity, different pH: the split moves but HCO3 + 2 CO3 stays put
+    base = dict(Temp=25, Ca=20, Mg=5, Na=60, K=2, Cl=30, SO4=10, Total_Alk_CaCO3=150)
+    lo, _ = run(one_sample(pH=7.0, **base))
+    hi, _ = run(one_sample(pH=9.5, **base))
+    assert lo.at[0, 'CO3 (meq/L)'] < 0.01 * lo.at[0, 'HCO3 (meq/L)']
+    assert hi.at[0, 'CO3 (meq/L)'] > 0.2 * hi.at[0, 'HCO3 (meq/L)']
+    for t in (lo, hi):
+        total = t.at[0, 'HCO3 (meq/L)'] + t.at[0, 'CO3 (meq/L)']
+        assert total == pytest.approx(t.at[0, 'Alkalinity (meq/L)'], rel=0.03)
+    assert 'HCO3' not in chem.TEMPLATE_COLS and 'CO3' not in chem.TEMPLATE_COLS
 
 
 def test_text_cells_are_dropped_and_listed():
@@ -57,8 +78,8 @@ def test_fill_rules_flag_the_right_samples():
     t, _ = run(raw)
     assert t.at[2, 'pH'] == pytest.approx(7.5)
     assert t.at[2, 'Temp'] == pytest.approx(25.0)
-    assert t.at[2, 'HCO3 (mmol/L)'] == pytest.approx(1.5, rel=1e-4)
-    assert t.at[2, 'Filled'] == 'pH, Temp, HCO3'
+    assert t.at[2, 'Alkalinity (meq/L)'] == pytest.approx(1.5, rel=1e-4)
+    assert t.at[2, 'Filled'] == 'pH, Temp, Alkalinity'
     assert t.at[0, 'Filled'] == ''
     # hollow markers
     assert not chem.hollow_mask(t, ['Na (mmol/L)', 'Cl (mmol/L)'])[2]
@@ -67,7 +88,7 @@ def test_fill_rules_flag_the_right_samples():
 
     t2, _ = run(raw, rules={'pH': ('value', 6.5), 'Temp': ('value', 22), 'HCO3': ('balance', 0)})
     assert t2.at[2, 'pH'] == 6.5
-    assert t2.at[2, 'CBE (%)'] == pytest.approx(0.0, abs=1e-6)
+    assert t2.at[2, 'CBE (%)'] == pytest.approx(0.0, abs=0.5)
 
 
 def test_piper_corners_and_water_types():
