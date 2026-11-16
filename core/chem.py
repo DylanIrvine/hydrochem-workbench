@@ -16,6 +16,7 @@
 
 # %%
 import io
+import re
 
 import numpy as np
 import pandas as pd
@@ -131,7 +132,7 @@ def template_bytes():
             '',
             'One unit for every ion column. Do not mix. (Alkalinity as CaCO3 is the exception, see above.)',
             'Leave a cell blank if not measured. Missing pH, Temp and alkalinity are filled by the rule you pick in the app and drawn hollow.',
-            'Values such as <0.05 or "bd" are not numbers. They are dropped and listed in the app. Decide what to do with them before uploading.',
+            'Values such as <0.05, and negative values used to mean below the LOR, can be replaced in the app by a fraction of the LOR (half by default), or left out. Text with no number (e.g. "bd") is always left out and listed in the app.',
         ]})
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as xl:
@@ -198,6 +199,43 @@ def example_data():
     df['Color'] = ''
     df['Marker'] = ''
     return df[TEMPLATE_COLS]
+
+
+# %% below the limit of reporting
+# "<0.05", "< 0.05", "<=0.05", "<0.05 mg/L"
+_BELOW = re.compile(r'^\s*<\s*=?\s*((?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*[^\d\s]*\s*$')
+# columns where a negative number can only mean below the LOR
+CONC_COLS = list(ANALYTES) + ALK_COLS + [DIC_COL]
+# never touched: identifiers, styles and the field values that are not concentrations
+_NOT_CONC = set(ID_COLS + STYLE_COLS + ['pH', 'Temp', 'EC'])
+
+
+def below_lor(raw, fraction=0.5, text=True, negative=True):
+    # replace below-LOR values with fraction x LOR, before clean()
+    # text: "<0.05" style cells, in the concentration columns, TDS and any extra column
+    # negative: negative numbers in the concentration columns (labs that report -0.05 for <0.05)
+    # returns (raw with the values replaced, table of what was replaced)
+    out = raw.copy()
+    rows = []
+    sample = out['Sample'] if 'Sample' in out.columns else pd.Series(out.index, index=out.index)
+    for c in out.columns:
+        if c in _NOT_CONC:
+            continue
+        for i, val in out[c].items():
+            lor = None
+            if text and isinstance(val, str):
+                m = _BELOW.match(val)
+                if m:
+                    lor = float(m.group(1))
+            if lor is None and negative and c in CONC_COLS:
+                num = pd.to_numeric(val, errors='coerce')
+                if pd.notna(num) and num < 0:
+                    lor = abs(float(num))
+            if lor is not None:
+                out.at[i, c] = lor * fraction
+                rows.append({'Sample': sample[i], 'Column': c, 'Value': val, 'LOR': lor,
+                             'Used': lor * fraction})
+    return out, pd.DataFrame(rows, columns=['Sample', 'Column', 'Value', 'LOR', 'Used'])
 
 
 # %% read and clean

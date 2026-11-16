@@ -191,3 +191,31 @@ def test_guidelines():
     assert se.set_index('Parameter').at['EC (uS/cm)', 'Guideline value'] == '125 to 2200'
     assert se.set_index('Parameter').at['Filterable reactive P', 'Guideline value'] == '0.02'
     assert 'Fluoride' in flags.set_index('Sample').at['bad', 'Outside guideline for']
+
+
+def test_below_lor_text_and_negative():
+    raw = one_sample(pH=7, Temp=25, Ca=40, Mg=5, Na=10, K='<0.5', Cl=10, SO4=-2, Total_Alk_CaCO3=100,
+                     F='< 0.1 mg/L', Br='bd')
+    out, rep = chem.below_lor(raw, 0.5)
+    assert out.at[0, 'K'] == pytest.approx(0.25)
+    assert out.at[0, 'SO4'] == pytest.approx(1.0)
+    assert out.at[0, 'F'] == pytest.approx(0.05)
+    assert out.at[0, 'Br'] == 'bd'   # no number, left for clean() to drop
+    assert set(rep['Column']) == {'K', 'SO4', 'F'}
+    df, dropped, extra, problems = chem.clean(out)
+    assert list(dropped['Column']) == ['Br']
+
+
+def test_below_lor_switches_and_fraction():
+    raw = one_sample(pH=7, K='<0.5', SO4=-2)
+    out, rep = chem.below_lor(raw, 0.1, text=False, negative=True)
+    assert out.at[0, 'K'] == '<0.5' and out.at[0, 'SO4'] == pytest.approx(0.2)
+    out, rep = chem.below_lor(raw, 1.0, text=True, negative=False)
+    assert out.at[0, 'K'] == pytest.approx(0.5) and out.at[0, 'SO4'] == -2
+
+
+def test_below_lor_leaves_ph_and_isotopes_alone():
+    raw = one_sample(pH='-1', Ca=40)
+    raw['d18O'] = -6.2
+    out, rep = chem.below_lor(raw, 0.5)
+    assert out.at[0, 'd18O'] == -6.2 and out.at[0, 'pH'] == '-1' and rep.empty

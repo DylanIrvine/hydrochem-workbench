@@ -24,6 +24,7 @@ import streamlit as st
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib import colors as mcolors
 
 import core
 from core import chem, guidelines, plots, usage
@@ -31,7 +32,7 @@ from core import chem, guidelines, plots, usage
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.8.2'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.9.0'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -220,24 +221,28 @@ def get_phreeqc():
     return phreeqpython.PhreeqPython(database='phreeqc.dat')
 
 
-def process(raw, unit, n_as_n, p_as_p, dic_unit, rules):
-    # clean, convert, fill, run PHREEQC
+def process(raw, unit, n_as_n, p_as_p, dic_unit, rules, lor):
+    # below-LOR substitution, clean, convert, fill, run PHREEQC
+    # lor = (fraction, text, negative)
     # results are kept in session_state (not st.cache_data) so nothing is held after the user leaves
-    key = hashlib.sha1((raw.to_csv() + repr((unit, n_as_n, p_as_p, dic_unit, rules))).encode()).hexdigest()
+    key = hashlib.sha1((raw.to_csv() + repr((unit, n_as_n, p_as_p, dic_unit, rules, lor))).encode()).hexdigest()
     cached = st.session_state.get('result')
     if cached is not None and cached[0] == key:
         return cached[1]
 
     with st.spinner('Running PHREEQC ...'):
+        fraction, lor_text, lor_neg = lor
+        raw, replaced = chem.below_lor(raw, fraction, text=lor_text, negative=lor_neg)
         df, dropped, extra_cols, problems = chem.clean(raw)
         # duplicates are flagged but still run
         if any(not p.startswith('Duplicate') for p in problems):
-            out = (None, dropped, None, problems)
+            out = (None, dropped, None, problems, replaced)
         else:
             mmol, alk_source = chem.to_mmol(df, unit, n_as_n, p_as_p, dic_unit)
             df, mmol, filled = chem.fill_missing(df, mmol, dict(rules))
             phreeqc, errors, mmol = chem.run_phreeqc(df, mmol, get_phreeqc())
-            out = (chem.build_table(df, mmol, filled, phreeqc, extra_cols, alk_source), dropped, errors, problems)
+            out = (chem.build_table(df, mmol, filled, phreeqc, extra_cols, alk_source), dropped, errors, problems,
+                   replaced)
     st.session_state['result'] = (key, out)
     return out
 
@@ -269,7 +274,23 @@ with st.sidebar:
     dic_unit = st.selectbox('DIC column is in', ['mg/L as C', 'mmol/L'],
                             help='DIC is only used for samples with no alkalinity.')
 
-    st.header('3. Missing values')
+    st.header('3. Below the LOR')
+    st.caption('Values below the limit of reporting (LOR) can be replaced by a fraction of the LOR. '
+               'Anything not replaced is treated as missing and listed on the Data tab.')
+    lor_text = st.toggle('Replace "<" values (e.g. <0.05)', value=True,
+                         help='Concentration columns, TDS and any extra numeric column.')
+    lor_neg = st.toggle('Replace negative concentrations', value=True,
+                        help='Some labs report -0.05 to mean <0.05. Only the ion, alkalinity and DIC columns.')
+    LOR_FRACTIONS = {'0.5 x LOR (half)': 0.5, '0.25 x LOR': 0.25, '0.1 x LOR': 0.1,
+                     '1 x LOR (the LOR itself)': 1.0, 'Other': None}
+    lor_pick = st.selectbox('Replace with', list(LOR_FRACTIONS), index=0,
+                            disabled=not (lor_text or lor_neg))
+    lor_fraction = LOR_FRACTIONS[lor_pick]
+    if lor_fraction is None:
+        lor_fraction = st.number_input('Fraction of the LOR', min_value=0.001, max_value=1.0, value=0.5,
+                                       step=0.05, format='%.3f', disabled=not (lor_text or lor_neg))
+
+    st.header('4. Missing values')
     st.caption('Missing pH, temperature and alkalinity are filled so every sample can be '
                'speciated. Filled samples are drawn hollow wherever the fill affects the plot.')
     ph_how = st.selectbox('Missing pH', ['Mean of the dataset', 'Fixed value'])
@@ -279,9 +300,14 @@ with st.sidebar:
     h_how = st.selectbox('Missing alkalinity', ['Mean of the dataset', 'From charge balance', 'Fixed value'])
     h_val = st.number_input('Fixed alkalinity (mg/L as CaCO3)', value=DEFAULT_ALK, step=10.0) if h_how == 'Fixed value' else DEFAULT_ALK
 
-    st.header('4. Plot options')
+    st.header('5. Plot options')
     log_conc = st.checkbox('Log axes on concentration plots', value=False,
                            help='Useful when fresh and saline samples share a plot.')
+    letters = st.selectbox('Panel letters (multipanel figures)', ['None'] + list(plots.PANEL_LABELS),
+                           index=0, help='For the gallery pages and the Stiff grid.')
+    letters = None if letters == 'None' else letters
+    letters_pos = st.selectbox('Panel letter position', plots.PANEL_LABEL_POS, index=0,
+                               disabled=letters is None)
 
 HOW = {'Mean of the dataset': 'mean', 'Fixed value': 'value', 'From charge balance': 'balance'}
 rules = (('pH', (HOW[ph_how], ph_val)), ('Temp', (HOW[t_how], t_val)), ('HCO3', (HOW[h_how], h_val)))
@@ -300,8 +326,8 @@ else:
     st.info('Upload a filled template, or tick the synthetic example in the sidebar, to begin.')
     st.stop()
 
-v, dropped, errors, problems = process(raw, unit, n_choice.startswith('As N'), p_choice.endswith('as P'),
-                                       dic_unit, rules)
+v, dropped, errors, problems, replaced = process(raw, unit, n_choice.startswith('As N'), p_choice.endswith('as P'),
+                                                 dic_unit, rules, (lor_fraction, lor_text, lor_neg))
 for p in problems:
     st.error(p)
 if v is None:
@@ -312,10 +338,14 @@ show_use_count()
 
 # %% warnings
 n_dropped = 0 if dropped is None else len(dropped)
+n_replaced = 0 if replaced is None else len(replaced)
+if n_replaced:
+    st.info(f'{n_replaced} value(s) below the LOR were replaced with {lor_fraction:g} x LOR. '
+            'They are listed on the Data tab.')
 if n_dropped:
-    st.warning(f'{n_dropped} cell(s) were not numbers (for example "<0.05") and were treated as '
-               'missing. They are listed on the Data tab. Decide how you want to handle them and '
-               're-upload if needed.')
+    st.warning(f'{n_dropped} cell(s) were not usable numbers and were treated as missing. '
+               'They are listed on the Data tab. The "Below the LOR" options in the sidebar handle '
+               '"<" and negative values; anything else (e.g. "bd", "n/a") needs fixing in the file.')
 saline = v['Ionic strength (mol/kgw)'] > chem.IONIC_STRENGTH_WARN
 if saline.any():
     st.warning(f'{int(saline.sum())} sample(s) have ionic strength above {chem.IONIC_STRENGTH_WARN} '
@@ -330,6 +360,47 @@ if n_filled:
             'not show them.')
 if errors is not None and len(errors):
     st.warning(f'PHREEQC did not converge for {len(errors)} sample(s); see the Data tab.')
+
+# %% groups: colour, marker, show or hide
+# defaults come from the palette, or the Color/Marker columns in the file
+labels = list(pd.unique(v['Label']))
+default_styles = plots.group_styles(v)
+marker_codes = list(plots.MARKER_NAMES)
+marker_names = list(plots.MARKER_NAMES.values())
+with st.expander(f'**Groups (Label): colours, markers and which to plot** ({len(labels)} group(s))',
+                 expanded=True):
+    if st.button('Reset to defaults', key='grp_reset'):
+        for lab in labels:
+            for pre in ('grp_show_', 'grp_col_', 'grp_mk_'):
+                st.session_state.pop(pre + lab, None)
+    h1, h2, h3, h4 = st.columns([1, 3, 1.4, 2.6])
+    h1.caption('Plot')
+    h2.caption('Label')
+    h3.caption('Colour')
+    h4.caption('Marker')
+    group_style = {}
+    shown = []
+    for lab in labels:
+        col0, mk0 = default_styles[lab]
+        names = marker_names if mk0 in marker_codes else marker_names + [mk0]
+        codes = marker_codes if mk0 in marker_codes else marker_codes + [mk0]
+        c1, c2, c3, c4 = st.columns([1, 3, 1.4, 2.6], vertical_alignment='center')
+        if c1.checkbox('Plot', value=True, key='grp_show_' + lab, label_visibility='collapsed'):
+            shown.append(lab)
+        c2.write(lab)
+        col = c3.color_picker('Colour', value=mcolors.to_hex(col0), key='grp_col_' + lab,
+                              label_visibility='collapsed')
+        mk_name = c4.selectbox('Marker', names, index=codes.index(mk0), key='grp_mk_' + lab,
+                               label_visibility='collapsed')
+        group_style[lab] = (col, codes[names.index(mk_name)])
+    st.caption('Unticked groups are left off every plot. The tables and the results download '
+               'keep all samples.')
+
+v = v.copy()
+v['Color'] = v['Label'].map(lambda l: group_style[l][0])
+v['Marker'] = v['Label'].map(lambda l: group_style[l][1])
+# vp is what the plots see
+vp = v[v['Label'].isin(shown)]
 
 numeric_choices = chem.plottable(v)
 # radio buttons and not st.tabs, as tabs redraw every figure on every click
@@ -356,6 +427,9 @@ if view == 'Data and checks':
                'CBE is signed: positive means excess cations. TDS is the measured value where '
                'given, otherwise the sum of ions with bicarbonate x 0.4917.')
 
+    if n_replaced:
+        st.subheader('Values below the LOR that were replaced')
+        st.dataframe(replaced.astype({'Value': str}), hide_index=True)
     if n_dropped:
         st.subheader('Cells treated as missing')
         st.dataframe(dropped.astype(str), hide_index=True)
@@ -408,16 +482,22 @@ if view == 'Guidelines':
         'Total N and total P are not in the template, so those guideline values are not checked. '
         'Guideline values are revised from time to time: check the current source before relying on them.')
 
+# %% plots need at least one group
+PLOT_VIEWS = ('Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot')
+if view in PLOT_VIEWS and vp.empty:
+    st.info('No groups are ticked to plot. Tick at least one in the Groups panel above.')
+    st.stop()
+
 # %% view: Piper
 if view == 'Piper':
     c1, c2, c3 = st.columns(3)
     p_color = c1.selectbox('Colour by', ['Group (Label)'] + numeric_choices, key='piper_color')
     p_types = c2.checkbox('Water-type labels', value=True)
     p_legend = c3.checkbox('Legend for the coloured fields', value=False)
-    fig = plots.piper(v, color_by=None if p_color.startswith('Group') else p_color,
+    fig = plots.piper(vp, color_by=None if p_color.startswith('Group') else p_color,
                       water_legend=p_legend, show_types=p_types)
     show(fig, 'piper', 'dl_piper')
-    not_shown = int(v['piper_d_x'].isna().sum())
+    not_shown = int(vp['piper_d_x'].isna().sum())
     if not_shown:
         st.caption(f'{not_shown} sample(s) are missing a major ion and are not on the diagram.')
 
@@ -425,17 +505,17 @@ if view == 'Piper':
 if view == 'Classical diagrams':
     kind = st.selectbox('Diagram', ['Schoeller', 'Stiff'] + list(plots.WQ_DIAGRAMS))
     if kind == 'Schoeller':
-        show(plots.schoeller(v), 'schoeller', 'dl_schoeller')
+        show(plots.schoeller(vp), 'schoeller', 'dl_schoeller')
     elif kind == 'Stiff':
-        chosen = st.multiselect('Samples', list(v['Sample']), default=list(v['Sample'][:12]),
+        chosen = st.multiselect('Samples', list(vp['Sample']), default=list(vp['Sample'][:12]),
                                 max_selections=MAX_STIFF)
-        fig = plots.stiff(v, chosen)
+        fig = plots.stiff(vp, chosen, letters=letters, letters_pos=letters_pos)
         if fig is not None:
             show(fig, 'stiff', 'dl_stiff')
     else:
         st.caption('Drawn by WQChartPy (Yang et al., 2022, Groundwater) in its own style. '
                    'Not yet restyled to match the rest of the app.')
-        fig, note = plots.wqchartpy_figure(v, kind)
+        fig, note = plots.wqchartpy_figure(vp, kind)
         if note:
             st.warning(note)
         if fig is None:
@@ -449,12 +529,13 @@ if view == 'Diagnostic gallery':
     c1, c2 = st.columns(2)
     group = c1.selectbox('Plot set', list(plots.GALLERY))
     g_color = c2.selectbox('Colour by', ['Group (Label)'] + numeric_choices, key='gallery_color')
-    panels = [p for p in plots.GALLERY[group] if plots.available(v, p)]
+    panels = [p for p in plots.GALLERY[group] if plots.available(vp, p)]
     skipped = len(plots.GALLERY[group]) - len(panels)
     if not panels:
         st.info('None of the variables for this set are in the data.')
     for k in range(0, len(panels), PANELS_PER_PAGE):
-        fig = plots.gallery_page(v, panels[k:k + PANELS_PER_PAGE], log_conc=log_conc,
+        fig = plots.gallery_page(vp, panels[k:k + PANELS_PER_PAGE], log_conc=log_conc,
+                                 letters=letters, letters_pos=letters_pos,
                                  color_by=None if g_color.startswith('Group') else g_color)
         show(fig, f'{group.lower().replace(" ", "_").replace("/", "-")}_{k // PANELS_PER_PAGE + 1}',
              f'dl_gallery_{k}')
@@ -478,7 +559,7 @@ if view == 'Custom plot':
     one = c3.checkbox('1:1 line')
     zero = c4.checkbox('y = 0 line')
     ann = c5.checkbox('Label samples')
-    fig = plots.custom(v, cx, cy, xlog=xlog, ylog=ylog, one_to_one=one, zero_line=zero, annotate=ann,
+    fig = plots.custom(vp, cx, cy, xlog=xlog, ylog=ylog, one_to_one=one, zero_line=zero, annotate=ann,
                        color_by=None if cc.startswith('Group') else cc)
     show(fig, 'custom_plot', 'dl_custom')
 
@@ -486,16 +567,25 @@ if view == 'Custom plot':
 if view == 'Export':
     st.subheader('Results table')
     out_cols = [c for c in v.columns if not c.startswith('piper_') and c not in ('Color', 'Marker')]
+    lor_used = ('Not replaced' if not (lor_text or lor_neg) else
+                f'{lor_fraction:g} x LOR for ' + ' and '.join(
+                    [w for w, on in (('"<" values', lor_text), ('negative concentrations', lor_neg)) if on]))
     settings = pd.DataFrame({'Setting': ['App version', 'Database', 'Input unit', 'Alkalinity', 'N species', 'PO4 column', 'DIC unit',
-                                         'Missing pH', 'Missing temperature', 'Missing alkalinity'],
+                                         'Below the LOR', 'Missing pH', 'Missing temperature', 'Missing alkalinity'],
                              'Value': [APP_VERSION, 'phreeqc.dat (phreeqpython)', unit, 'mg/L as CaCO3; HCO3 and CO3 from PHREEQC (see "Alkalinity from" column)', n_choice, p_choice, dic_unit,
-                                       ph_how + (f' ({ph_val})' if ph_how == 'Fixed value' else ''),
+                                       lor_used, ph_how + (f' ({ph_val})' if ph_how == 'Fixed value' else ''),
                                        t_how + (f' ({t_val})' if t_how == 'Fixed value' else ''),
                                        h_how + (f' ({h_val} mg/L as CaCO3)' if h_how == 'Fixed value' else '')]})
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as xl:
         v[out_cols].to_excel(xl, sheet_name='Results', index=False)
         settings.to_excel(xl, sheet_name='Settings', index=False)
+        pd.DataFrame({'Label': labels, 'Plotted': [lab in shown for lab in labels],
+                      'Colour': [group_style[lab][0] for lab in labels],
+                      'Marker': [group_style[lab][1] for lab in labels]}).to_excel(
+            xl, sheet_name='Groups', index=False)
+        if n_replaced:
+            replaced.astype({'Value': str}).to_excel(xl, sheet_name='Below LOR replaced', index=False)
         if n_dropped:
             dropped.astype(str).to_excel(xl, sheet_name='Cells treated as missing', index=False)
         if guide_sets:
@@ -504,20 +594,24 @@ if view == 'Export':
             g_flags.to_excel(xl, sheet_name='Guidelines by sample', index=False)
     st.download_button('Download results (.xlsx)', buf.getvalue(), file_name='hydrochem_workbench_results.xlsx',
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    st.caption('Every derived variable, saturation index and flag, plus the settings used, so the '
-               'run can be reproduced.')
+    st.caption('Every derived variable, saturation index and flag for all samples (including any '
+               'groups not plotted), plus the settings, group styles and replaced below-LOR values, so '
+               'the run can be reproduced. The figure zip uses the plotted groups only.')
 
     st.subheader('All figures')
     dpi = st.selectbox('Resolution', [300, 600], index=0)
-    if st.button('Build a zip of every figure'):
+    if vp.empty:
+        st.info('No groups are ticked to plot, so there are no figures to build.')
+    elif st.button('Build a zip of every figure'):
         zbuf = io.BytesIO()
         with zipfile.ZipFile(zbuf, 'w', zipfile.ZIP_DEFLATED) as z:
-            z.writestr('piper.png', plots.fig_png(plots.piper(v), dpi))
-            z.writestr('schoeller.png', plots.fig_png(plots.schoeller(v), dpi))
+            z.writestr('piper.png', plots.fig_png(plots.piper(vp), dpi))
+            z.writestr('schoeller.png', plots.fig_png(plots.schoeller(vp), dpi))
             for gname, gpanels in plots.GALLERY.items():
-                gp = [p for p in gpanels if plots.available(v, p)]
+                gp = [p for p in gpanels if plots.available(vp, p)]
                 for k in range(0, len(gp), PANELS_PER_PAGE):
-                    f = plots.gallery_page(v, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc)
+                    f = plots.gallery_page(vp, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc,
+                                          letters=letters, letters_pos=letters_pos)
                     fname = gname.lower().replace(' ', '_').replace('/', '-')
                     z.writestr(f'gallery/{fname}_{k // PANELS_PER_PAGE + 1}.png', plots.fig_png(f, dpi))
         st.download_button('Download figures (.zip)', zbuf.getvalue(), file_name='hydrochem_workbench_figures.zip',

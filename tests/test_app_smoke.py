@@ -41,7 +41,35 @@ def test_app_runs_on_example_data(tmp_path, monkeypatch):
         assert not at.exception
     [s for s in at.selectbox if s.key == 'gallery_color'][0].select('pH').run()
     assert not at.exception
+    [s for s in at.selectbox if s.label.startswith('Panel letters')][0].select('(a)').run()
+    assert not at.exception
+    [s for s in at.selectbox if s.label == 'Panel letter position'][0].select(
+        'Top left, inside the panel').run()
+    assert not at.exception
     go('Custom plot')
+    # one group only, then a new colour and marker for it
+    groups = [c for c in at.checkbox if c.key and c.key.startswith('grp_show_')]
+    assert len(groups) == 3
+    for c in groups[1:]:
+        c.uncheck()
+    at.run()
+    assert not at.exception
+    at.color_picker(key=groups[0].key.replace('show', 'col')).pick('#123456').run()
+    at.selectbox(key=groups[0].key.replace('show', 'mk')).select('Star').run()
+    assert not at.exception
+    go('Piper')
+    go('Diagnostic gallery')
+    for c in groups[:1]:
+        at.checkbox(key=c.key).uncheck()
+    at.run()
+    assert any('No groups are ticked' in i.value for i in at.info)
+    at.button(key='grp_reset').click().run()
+    assert not at.exception
+    assert all(at.checkbox(key=c.key).value for c in groups)
+    # below-LOR options
+    [t for t in at.toggle if t.label.startswith('Replace negative')][0].set_value(False).run()
+    [s for s in at.selectbox if s.label == 'Replace with'][0].select('Other').run()
+    assert not at.exception
     go('Export')
     assert any(b.label == 'Build a zip of every figure' for b in at.button)
     # should still be 1

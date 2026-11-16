@@ -78,6 +78,10 @@ STYLE = {
 PALETTE = ['#FCB711', '#F37021', '#CC004C', '#6460AA', '#0089D0', '#0DB14B', '#808080',
            '#00bdd0', '#a88958', '#0055d0']
 MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X', '<', '>', 'h']
+# names for the app. Filled shapes only, so hollow markers still work
+MARKER_NAMES = {'o': 'Circle', 's': 'Square', '^': 'Triangle up', 'D': 'Diamond', 'v': 'Triangle down',
+                'P': 'Plus (filled)', 'X': 'Cross (filled)', '<': 'Triangle left', '>': 'Triangle right',
+                'h': 'Hexagon', 'p': 'Pentagon', '*': 'Star', 'd': 'Thin diamond', '8': 'Octagon'}
 
 # Piper colours
 PIPER = {'Ca': '#FCB711', 'NaK': '#F37021', 'Mg': '#CC004C',
@@ -92,11 +96,42 @@ _PRETTY = [('HCO3', 'HCO$_3$'), ('SO4', 'SO$_4$'), ('NO3', 'NO$_3$'),
            ('CO3', 'CO$_3$'), ('SiO2', 'SiO$_2$'), ('pCO2', 'pCO$_2$')]
 
 
+# whole-name axis labels: units for the field columns, and the SAR definition
+_LABELS = {'EC': 'EC (µS/cm)', 'Temp': 'Temperature (°C)',
+           'SAR': 'SAR = Na/$\\sqrt{(Ca+Mg)/2}$\n(ions in meq/L)'}
+
+
 def pretty(name):
-    out = name
+    if name in _LABELS:
+        return _LABELS[name]
+    out = name.replace('uS/cm', 'µS/cm')
     for raw, nice in _PRETTY:
         out = out.replace(raw, nice)
     return out
+
+
+# panel letters for multipanel figures
+PANEL_LABELS = {'(a)': '({})', 'a)': '{})', 'a.': '{}.', 'A': '{}'}
+PANEL_LABEL_POS = ['Top right, above the panel', 'Top left, above the panel',
+                   'Top right, inside the panel', 'Top left, inside the panel']
+
+
+def panel_letters(axs, style=None, pos=PANEL_LABEL_POS[0]):
+    # style is a key of PANEL_LABELS (None for no letters)
+    if not style or style not in PANEL_LABELS:
+        return
+    right = 'right' in pos
+    inside = 'inside' in pos
+    for k, ax in enumerate(axs):
+        letter = chr(ord('a') + k) if k < 26 else chr(ord('a') + k // 26 - 1) + chr(ord('a') + k % 26)
+        if style == 'A':
+            letter = letter.upper()
+        text = PANEL_LABELS[style].format(letter)
+        x = 0.97 if (right and inside) else (1.0 if right else (0.03 if inside else 0.0))
+        y = 0.96 if inside else 1.02
+        ax.text(x, y, text, transform=ax.transAxes, ha='right' if right else 'left',
+                va='top' if inside else 'bottom', fontsize=9, zorder=30,
+                bbox=dict(fc='white', ec='none', pad=0.5, alpha=0.8) if inside else None)
 
 
 def group_styles(v):
@@ -328,7 +363,7 @@ def schoeller(v):
 
 
 # %% Stiff
-def stiff(v, samples, ncols=4):
+def stiff(v, samples, ncols=4, letters=None, letters_pos=PANEL_LABEL_POS[0]):
     # grid of Stiff diagrams, all on the same meq/L scale
     sub = v[v['Sample'].isin(samples)]
     n = len(sub)
@@ -370,6 +405,7 @@ def stiff(v, samples, ncols=4):
                 ax.text(cmax * 1.08, yy, lab, ha='left', va='center', fontsize=6)
         for ax in axs[n:]:
             ax.axis('off')
+        panel_letters(axs[:n], letters, letters_pos)
         fig.text(0.5, 0.01, 'meq/L (common scale). Hatched = filled HCO$_3$.', ha='center', fontsize=7)
     return fig
 
@@ -759,7 +795,7 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
     return mappable, hollow & ok
 
 
-def gallery_page(v, panels, log_conc=False, color_by=None):
+def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters_pos=PANEL_LABEL_POS[0]):
     # up to 6 panels (2 x 3) with one legend along the bottom
     panels = [p for p in panels if available(v, p)]
     if not panels:
@@ -782,6 +818,7 @@ def gallery_page(v, panels, log_conc=False, color_by=None):
             any_hollow = any_hollow or bool(hol.any())
         for ax in axs[n:]:
             ax.axis('off')
+        panel_letters(axs[:n], letters, letters_pos)
         if color_by and mappable is not None:
             cax = fig.add_axes([0.89, 0.25, 0.018, 0.5])
             fig.colorbar(mappable, cax=cax).set_label(pretty(color_by))

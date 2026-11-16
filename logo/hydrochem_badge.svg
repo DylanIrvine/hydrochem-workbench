@@ -41,14 +41,13 @@
      inkscape:window-height="1009"
      id="namedview69"
      showgrid="false"
-     inkscape:zoom="1.7136859"
-     inkscape:cx="-26.068674"
-     inkscape:cy="34.077536"
+     inkscape:zoom="2.4235178"
+     inkscape:cx="70.394778"
+     inkscape:cy="78.360162"
      inkscape:window-x="-8"
      inkscape:window-y="-8"
      inkscape:window-maximized="1"
-     inkscape:current-layer="svg67"
-     inkscape:document-rotation="0" />
+     inkscape:current-layer="svg67" />
   <title
      id="title2">Hydrochem Workbench</title>
   <defs
@@ -255,15 +254,13 @@
      font-weight="bold"
      font-size="21.33px"
      fill="#3773a6"
-     id="text63"
-     style="font-size:26.6667px">Hydrochem</text>
+     id="text63">Hydrochem</text>
   <text
      x="37.676529"
-     y="201.38895"
+     y="196.43747"
      font-family="Arial, 'Liberation Sans', Helvetica, sans-serif"
      font-weight="bold"
      font-size="9.33px"
      fill="#3773a6"
-     id="text65"
-     style="font-size:16px">Workbench</text>
+     id="text65">Workbench</text>
 </svg>

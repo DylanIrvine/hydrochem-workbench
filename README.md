@@ -105,7 +105,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D. (2026). Hydrochem Workbench (version 0.8.2) [Web application].
+Irvine, D. (2026). Hydrochem Workbench (version 0.9.0) [Web application].
 Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).
