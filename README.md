@@ -19,15 +19,19 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
 1. **Template in.** One row per sample, one unit for every ion (mg/L, mmol/L or
    meq/L, chosen in the app). Alkalinity goes in as the lab reports it, in mg/L
    as CaCO3: total alkalinity, or bicarbonate and carbonate alkalinity. HCO3 and
-   CO3 are not inputs. PHREEQC calculates both from alkalinity and pH, and those
-   values are used in every plot. Where there is no alkalinity, DIC (mg/L as C
+   CO3 are optional: where entered (in the ion unit) they are used as given,
+   and where both are blank PHREEQC calculates them from alkalinity and pH. If
+   only one is entered, the other is the rest of the alkalinity (HCO3 + 2 CO3 =
+   alkalinity in meq/L). The results table says where each came from. With no
+   alkalinity columns, HCO3 + CO3 are converted to alkalinity for PHREEQC. Where there is no alkalinity, DIC (mg/L as C
    or mmol/L) can be given instead and PHREEQC works from DIC and pH. Nitrate
    and ammonium can be as the ion or as N, phosphate as PO4 or as P. Any extra
    numeric column (depth, isotopes) is carried through and can be plotted.
 2. **Missing values.** Missing pH, temperature and alkalinity are filled (dataset
    mean, a fixed value, or for alkalinity the charge-balance value). Filled samples
-   are drawn hollow, but only on plots the fill actually affects. Text cells
-   such as `<0.05` are dropped and listed; dealing with them is the user's job.
+   are drawn hollow, but only on plots the fill actually affects. Values below
+   the LOR (`<0.05`, or negative values) can be replaced by a chosen fraction
+   of the LOR (half by default); other text cells are dropped and listed.
 3. **PHREEQC.** `phreeqpython` with `phreeqc.dat`. Saturation indices for
    calcite, aragonite, dolomite, gypsum, anhydrite, halite, fluorite, quartz,
    chalcedony, barite, celestite and strontianite (each only where its elements
@@ -52,8 +56,13 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
      TDS, Cl, pH, their own ions and each other, the carbonate system,
      irrigation quality (SAR, percent Na) and quality checks
    - Custom plot: any variable against any other
-6. **Export.** Results table with every derived variable and the settings used;
-   a zip of all figures.
+6. **Export.** Results table with every derived variable, a Settings sheet with
+   every option used, the group colours and markers, and any replaced below-LOR
+   values; a zip of all figures. File names start with the dataset name.
+7. **Several datasets, same settings.** "Load another dataset" replaces the data
+   and keeps every setting (units, below-LOR, missing values, plot options,
+   group colours and markers, guidelines), so several sites, or an edited sheet,
+   can be run the same way.
 
 ## Privacy
 

@@ -29,8 +29,8 @@ ANALYTES = {
     'Mg':   (24.305,  +2, 'Mg'),
     'Na':   (22.990,  +1, 'Na'),
     'K':    (39.098,  +1, 'K'),
-    'HCO3': (61.017,  -1, None),      # not an input: from PHREEQC
-    'CO3':  (60.009,  -2, None),      # not an input: from PHREEQC
+    'HCO3': (61.017,  -1, None),      # used as given if entered, otherwise from PHREEQC
+    'CO3':  (60.009,  -2, None),      # used as given if entered, otherwise from PHREEQC
     'Cl':   (35.453,  -1, 'Cl'),
     'SO4':  (96.06,   -2, 'S(6)'),
     'NO3':  (62.004,  -1, 'N(5)'),
@@ -56,11 +56,12 @@ ALK_COLS = ['Total_Alk_CaCO3', 'Bicarb_Alk_CaCO3', 'Carb_Alk_CaCO3']
 # dissolved inorganic carbon, used when there is no alkalinity
 DIC_COL = 'DIC'
 STYLE_COLS = ['Color', 'Marker']
-# HCO3 and CO3 are not in the template. They are calculated by PHREEQC from
-# alkalinity and pH
+# HCO3 and CO3 are optional. If entered they are used as given, otherwise PHREEQC
+# calculates them from alkalinity (or DIC) and pH
 _ions = [a for a in ANALYTES if a not in ('HCO3', 'CO3')]
 _k = _ions.index('Cl')
-TEMPLATE_COLS = ID_COLS + FIELD_COLS + _ions[:_k] + ALK_COLS + [DIC_COL] + _ions[_k:] + STYLE_COLS
+TEMPLATE_COLS = (ID_COLS + FIELD_COLS + _ions[:_k] + ALK_COLS + [DIC_COL] + ['HCO3', 'CO3'] + _ions[_k:]
+                 + STYLE_COLS)
 
 UNITS = ['mg/L', 'mmol/L', 'meq/L']
 
@@ -107,6 +108,7 @@ def template_bytes():
         'Sample', 'Label', 'pH', 'Temp', 'EC', 'TDS',
         'Ca, Mg, Na, K, Cl, SO4 ...',
         'ALKALINITY', 'Total_Alk_CaCO3', 'Bicarb_Alk_CaCO3', 'Carb_Alk_CaCO3', 'DIC', '',
+        'HCO3', 'CO3',
         'NO3, NH4', 'PO4', 'SiO2', 'Color', 'Marker',
         '(any other column)', '', 'Units', 'Blank cells', 'Below detection'],
         'What goes in it': [
@@ -117,12 +119,14 @@ def template_bytes():
             'Electrical conductivity, uS/cm. Optional, used for plotting only.',
             'Total dissolved solids, mg/L. Optional. If blank, it is calculated from the ions.',
             'Concentrations, all in the single unit you choose in the app (mg/L, mmol/L or meq/L).',
-            'Enter alkalinity as it appears on the lab report, in mg/L as CaCO3. Do not convert it to HCO3 or CO3: PHREEQC calculates both from alkalinity and pH.',
+            'Enter alkalinity as it appears on the lab report, in mg/L as CaCO3. Do not convert it. PHREEQC uses it (with pH) for the speciation, and calculates HCO3 and CO3 from it unless you enter them.',
             'Total alkalinity, mg/L as CaCO3. Use this column if the report gives it.',
             'Bicarbonate alkalinity, mg/L as CaCO3. Use this (with the next column) if the report has no total.',
             'Carbonate alkalinity, mg/L as CaCO3. Often below detection: leave blank.',
             'Dissolved inorganic carbon, for samples with no alkalinity. mg/L as C or mmol/L (tell the app which). PHREEQC calculates HCO3 and CO3 from DIC and pH.',
-            'If total alkalinity is filled it is used. Otherwise bicarbonate + carbonate alkalinity, otherwise DIC. The alkalinity columns are always mg/L as CaCO3, whatever unit is chosen for the ions.',
+            'If total alkalinity is filled it is used. Otherwise bicarbonate + carbonate alkalinity, otherwise HCO3 + CO3 (next columns), otherwise DIC. The alkalinity columns are always mg/L as CaCO3, whatever unit is chosen for the ions.',
+            'Optional. Bicarbonate as the ion, in the same unit as the other ions, if you already have it (e.g. from the lab report). Used as given. Leave blank to have PHREEQC calculate it.',
+            'Optional. Carbonate as the ion, same unit as the other ions. Used as given. If both HCO3 and CO3 are blank, PHREEQC calculates both. If only one is entered, the other is the rest of the alkalinity (HCO3 + 2 CO3 = alkalinity, in meq/L), so carbonate is not counted twice. A CO3 below detection can be entered as 0 or as <LOR.',
             'Nitrate and ammonium (total ammonia), as the ion or as N (tell the app which). Lab reports usually give NO3-N and NH3-N, i.e. as N.',
             'Phosphate (filterable reactive phosphorus), as PO4 or as P (tell the app which).',
             'Silica as SiO2. Neutral, so if the unit is meq/L enter it in mmol/L.',
@@ -196,6 +200,12 @@ def example_data():
     df['NH4'] = rng.uniform(0.01, 0.12, len(df)).round(3)
     df['PO4'] = rng.uniform(0.005, 0.06, len(df)).round(3)
     df.loc[12, 'NO3'] = 62.0
+    # HCO3 and CO3 as a lab would report them (alkalinity x 1.219, CO3 below detection),
+    # for two samples only. The rest are left to PHREEQC
+    lab = df.index.isin([4, 5])
+    df.loc[lab, 'HCO3'] = (alk[lab] * 1.2192).round(1)
+    df.loc[lab, 'CO3'] = 0.0
+    df.loc[~lab, ['HCO3', 'CO3']] = np.nan
     df['Color'] = ''
     df['Marker'] = ''
     return df[TEMPLATE_COLS]
@@ -335,8 +345,10 @@ def to_mmol(df, unit, n_as_n=False, p_as_p=False, dic_unit='mg/L as C'):
     total = df['Total_Alk_CaCO3'].astype(float) / CACO3_PER_MEQ
     bicarb = df['Bicarb_Alk_CaCO3'].astype(float) / CACO3_PER_MEQ
     carb = df['Carb_Alk_CaCO3'].astype(float) / CACO3_PER_MEQ
-    # old files with HCO3 / CO3 columns (not in the template) are converted back
-    # to alkalinity so that they still run
+    # HCO3 and CO3 entered by the user: kept to replace the PHREEQC values later,
+    # and turned into alkalinity for samples with no alkalinity columns
+    mmol['HCO3_in'] = mmol['HCO3']
+    mmol['CO3_in'] = mmol['CO3']
     ions = mmol['HCO3'] + 2 * mmol['CO3'].fillna(0)
 
     mmol['Alk'] = np.nan
@@ -347,7 +359,7 @@ def to_mmol(df, unit, n_as_n=False, p_as_p=False, dic_unit='mg/L as C'):
         ok = vals.notna()
         mmol.loc[ok, 'Alk'] = vals[ok]
         source[ok] = name
-    # HCO3 and CO3 are set later, from PHREEQC
+    # HCO3 and CO3 are set later, from PHREEQC (or the user's columns)
     mmol['HCO3'] = np.nan
     mmol['CO3'] = np.nan
 
@@ -473,6 +485,19 @@ def run_phreeqc(df, mmol, pp):
         out.at[i, 'SC calc (uS/cm)'] = s.sc
         s.forget()
 
+    # entered HCO3 and CO3 replace the calculated values. If only one is entered,
+    # the other is what is left of the alkalinity (meq/L), so HCO3 + 2 CO3 still adds
+    # up to it and carbonate is not counted twice
+    h, c, alk = mmol['HCO3_in'], mmol['CO3_in'], mmol['Alk']
+    both = h.notna() & c.notna()
+    h_only = h.notna() & c.isna()
+    c_only = c.notna() & h.isna()
+    mmol.loc[both, 'HCO3'] = h[both]
+    mmol.loc[both, 'CO3'] = c[both]
+    mmol.loc[h_only, 'HCO3'] = h[h_only]
+    mmol.loc[h_only, 'CO3'] = ((alk - h) / 2).clip(lower=0)[h_only]
+    mmol.loc[c_only, 'CO3'] = c[c_only]
+    mmol.loc[c_only, 'HCO3'] = (alk - 2 * c).clip(lower=0)[c_only]
     return out, pd.DataFrame(errors, columns=['Sample', 'Error']), mmol
 
 
@@ -624,6 +649,13 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
         v['filled_' + c] = filled[c]
     v['Alkalinity from'] = alk_source if alk_source is not None else ''
     v['Alkalinity from'] = ['Filled' if f else a for a, f in zip(v['Alkalinity from'], filled['HCO3'])]
+    hco3_in = mmol['HCO3_in'].notna() if 'HCO3_in' in mmol else pd.Series(False, index=df.index)
+    co3_in = mmol['CO3_in'].notna() if 'CO3_in' in mmol else pd.Series(False, index=df.index)
+    v['HCO3 is input'] = hco3_in
+    v['CO3 is input'] = co3_in
+    v['HCO3, CO3 from'] = ['Entered' if h and c else 'HCO3 entered, CO3 = alkalinity - HCO3' if h else
+                           'CO3 entered, HCO3 = alkalinity - 2 CO3' if c else 'PHREEQC'
+                           for h, c in zip(hco3_in, co3_in)]
     names = {'pH': 'pH', 'Temp': 'Temp', 'HCO3': 'Alkalinity'}
     v['Filled'] = [', '.join(names[c] for c in filled.columns if filled.at[i, c]) for i in filled.index]
     return pd.DataFrame(v, index=df.index)
@@ -643,8 +675,9 @@ def hollow_mask(v, cols):
         elif c.startswith('Alkalinity') or c in _HCO3_DEPENDENT:
             mask |= v['filled_HCO3']
         elif 'CO3' in c:
-            # the HCO3 / CO3 split comes from pH
-            mask |= v['filled_HCO3'] | v['filled_pH']
+            # the HCO3 / CO3 split comes from pH, unless the user entered either ion
+            entered = v['HCO3 is input'] | v['CO3 is input']
+            mask |= v['filled_HCO3'] | (v['filled_pH'] & ~entered)
         elif c == 'TDS (mg/L)':
             mask |= v['filled_HCO3'] & ~v['TDS is measured']
         elif c == 'pH':
@@ -657,6 +690,7 @@ def hollow_mask(v, cols):
 
 
 INTERNAL_COLS = {'Sample', 'Label', 'Color', 'Marker', 'Water type', 'Filled', 'Alkalinity from',
+                 'HCO3, CO3 from', 'HCO3 is input', 'CO3 is input',
                  'TDS is measured', 'filled_pH', 'filled_Temp', 'filled_HCO3'}
 
 

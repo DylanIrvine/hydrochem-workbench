@@ -88,3 +88,50 @@ def test_app_recovers_from_stale_core_modules(tmp_path, monkeypatch):
     at.checkbox[0].check().run()
     at.radio[0].set_value('Guidelines').run()
     assert not at.exception
+
+
+def test_settings_survive_loading_another_dataset(tmp_path, monkeypatch):
+    # set things up on one dataset, load another, and nothing should be lost
+    from core import chem
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    first = chem.example_data().astype(object)
+    second = chem.example_data().astype(object).iloc[::2].reset_index(drop=True)
+    second['Sample'] = 'B' + second['Sample'].astype(str)
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state['dataset'] = ('site_a.xlsx', first)
+    at.run()
+    assert not at.exception
+    assert any(b.label == 'Load another dataset' for b in at.button)
+
+    lab = first['Label'].iloc[0]
+    at.selectbox(key='opt_lor_pick').select('0.1 x LOR').run()
+    at.selectbox(key='opt_letters').select('a)').run()
+    at.color_picker(key='grp_col_' + lab).pick('#123456').run()
+    at.radio(key='opt_view').set_value('Guidelines').run()
+    at.selectbox(key='guide_region').select(at.selectbox(key='guide_region').options[0]).run()
+    region = at.selectbox(key='guide_region').value
+    at.radio(key='opt_view').set_value('Piper').run()
+    at.selectbox(key='piper_color').select('pH').run()
+    assert not at.exception
+
+    # the button shows the uploader and says what it does; keeping the data goes back
+    at.button(key='load_another').click().run()
+    assert any('replaces the current data' in c.value for c in at.caption)
+    at.button(key='keep_data').click().run()
+    assert any(b.label == 'Load another dataset' for b in at.button)
+
+    # a new dataset arrives (as the uploader would leave it)
+    at.session_state['dataset'] = ('site_b.xlsx', second)
+    at.run()
+    assert not at.exception
+    assert any('site_b.xlsx' in m.value for m in at.markdown)
+    assert at.selectbox(key='opt_lor_pick').value == '0.1 x LOR'
+    assert at.selectbox(key='opt_letters').value == 'a)'
+    assert at.color_picker(key='grp_col_' + lab).value == '#123456'
+    assert at.radio(key='opt_view').value == 'Piper'
+    assert at.selectbox(key='piper_color').value == 'pH'
+    at.radio(key='opt_view').set_value('Guidelines').run()
+    assert at.selectbox(key='guide_region').value == region
+    at.radio(key='opt_view').set_value('Export').run()
+    assert not at.exception
+    assert any(b.label == 'Download results (.xlsx)' for b in at.get('download_button'))

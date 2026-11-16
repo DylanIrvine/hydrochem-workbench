@@ -64,7 +64,8 @@ def test_hco3_and_co3_come_from_phreeqc():
     for t in (lo, hi):
         total = t.at[0, 'HCO3 (meq/L)'] + t.at[0, 'CO3 (meq/L)']
         assert total == pytest.approx(t.at[0, 'Alkalinity (meq/L)'], rel=0.03)
-    assert 'HCO3' not in chem.TEMPLATE_COLS and 'CO3' not in chem.TEMPLATE_COLS
+    assert 'HCO3' in chem.TEMPLATE_COLS and 'CO3' in chem.TEMPLATE_COLS
+    assert set(lo['HCO3, CO3 from']) == {'PHREEQC'}
 
 
 def test_text_cells_are_dropped_and_listed():
@@ -219,3 +220,30 @@ def test_below_lor_leaves_ph_and_isotopes_alone():
     raw['d18O'] = -6.2
     out, rep = chem.below_lor(raw, 0.5)
     assert out.at[0, 'd18O'] == -6.2 and out.at[0, 'pH'] == '-1' and rep.empty
+
+
+def test_entered_hco3_and_co3_are_used():
+    # lab alkalinity drives PHREEQC, but the entered ions are reported
+    base = dict(Temp=25, Ca=20, Mg=5, Na=60, K=2, Cl=30, SO4=10, Total_Alk_CaCO3=150, pH=9.5)
+    t, _ = run(one_sample(HCO3=150.0, CO3=12.0, **base))
+    assert t.at[0, 'HCO3 (mg/L)'] == pytest.approx(150.0)
+    assert t.at[0, 'CO3 (mg/L)'] == pytest.approx(12.0)
+    assert t.at[0, 'Alkalinity (mg/L as CaCO3)'] == pytest.approx(150.0)
+    assert t.at[0, 'HCO3, CO3 from'] == 'Entered'
+    calc, _ = run(one_sample(**base))
+    assert t.at[0, 'SI Calcite'] == pytest.approx(calc.at[0, 'SI Calcite'], abs=1e-6)
+
+
+def test_one_entered_ion_takes_the_rest_of_the_alkalinity():
+    base = dict(Temp=25, Ca=20, Mg=5, Na=60, K=2, Cl=30, SO4=10, Total_Alk_CaCO3=150, pH=9.5)
+    alk = 150 / chem.CACO3_PER_MEQ
+    t, _ = run(one_sample(HCO3=140.0, **base))
+    assert t.at[0, 'HCO3 (mg/L)'] == pytest.approx(140.0)
+    assert t.at[0, 'HCO3 (meq/L)'] + t.at[0, 'CO3 (meq/L)'] == pytest.approx(alk, rel=1e-6)
+    t, _ = run(one_sample(CO3=6.0, **base))
+    assert t.at[0, 'CO3 (mg/L)'] == pytest.approx(6.0)
+    assert t.at[0, 'HCO3 (meq/L)'] + t.at[0, 'CO3 (meq/L)'] == pytest.approx(alk, rel=1e-6)
+    # HCO3 alone, no alkalinity columns: becomes the alkalinity, CO3 is zero
+    t, _ = run(one_sample(pH=7, Temp=25, Ca=40.078, Mg=0, Na=0, K=0, HCO3=122.034, Cl=0, SO4=0))
+    assert t.at[0, 'CO3 (meq/L)'] == pytest.approx(0.0, abs=1e-9)
+    assert t.at[0, 'CBE (%)'] == pytest.approx(0.0, abs=0.01)

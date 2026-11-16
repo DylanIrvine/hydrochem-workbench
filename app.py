@@ -54,6 +54,31 @@ MAX_STIFF = 24
 # theme (dark, red) is set in .streamlit/config.toml
 st.set_page_config(page_title=APP_NAME, page_icon='logo/favicon.png', layout='centered')
 
+# %% settings that survive
+# Streamlit drops the value of any widget that is not drawn on a run (another view,
+# or no data loaded). Writing the values back each run keeps every setting for the
+# whole session, so a new dataset is processed with the same choices
+KEEP = ('opt_', 'grp_show_', 'grp_col_', 'grp_mk_', 'guide_', 'piper_color', 'gallery_color',
+        'custom_color')
+for _k in list(st.session_state.keys()):
+    if _k.startswith(KEEP):
+        st.session_state[_k] = st.session_state[_k]
+
+
+def opt(key, default, options=None):
+    # set a widget's starting value through session_state (so widgets take no
+    # value/index argument) and drop a kept value that is no longer an option
+    if key in st.session_state and options is not None:
+        cur = st.session_state[key]
+        if isinstance(cur, list):
+            st.session_state[key] = [x for x in cur if x in options]
+        elif cur not in options:
+            del st.session_state[key]
+    if key not in st.session_state:
+        st.session_state[key] = default
+    return key
+
+
 # %% header
 head_text, head_logo = st.columns([3, 1], vertical_alignment='center')
 with head_text:
@@ -254,60 +279,97 @@ def show(fig, name, key):
 
 
 # %% sidebar: data in
+# the loaded table is kept in session_state, so the uploader is only needed to
+# bring in a dataset (the first one, or the next one)
+st.session_state.setdefault('upload_n', 0)
 with st.sidebar:
     st.header('1. Data')
     st.download_button('Download the template', chem.template_bytes(),
                        file_name='hydrochem_workbench_template.xlsx',
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    uploaded = st.file_uploader('Upload the filled template', type=['xlsx', 'csv'])
-    use_example = st.checkbox('Use the synthetic example data', value=False,
+    use_example = st.checkbox('Use the synthetic example data', key=opt('opt_example', False),
                               help='Made-up samples for trying the app. Not real data.')
+    dataset = st.session_state.get('dataset')   # (file name, raw table)
+    if not use_example:
+        if dataset is None or st.session_state.get('replacing'):
+            up = st.file_uploader('Upload the filled template' if dataset is None else 'Upload the next dataset',
+                                  type=['xlsx', 'csv'], key=f"uploader_{st.session_state['upload_n']}")
+            if dataset is not None:
+                st.caption(f'This replaces the current data ({dataset[0]}). All settings are kept.')
+                if st.button('Keep the current data', key='keep_data'):
+                    st.session_state['replacing'] = False
+                    st.rerun()
+            if up is not None:
+                try:
+                    st.session_state['dataset'] = (up.name, chem.read_upload(up))
+                except Exception as exc:
+                    st.error(f'Could not read that file: {exc}')
+                else:
+                    st.session_state['replacing'] = False
+                    st.session_state['upload_n'] += 1
+                    st.rerun()
+        else:
+            st.markdown(f'**Loaded:** {dataset[0]} ({len(dataset[1])} rows)')
+            if st.button('Load another dataset', key='load_another'):
+                st.session_state['replacing'] = True
+                st.rerun()
+            st.caption('Replaces the current data with a new file. Every setting (units, below-LOR, '
+                       'missing values, plot options, group colours and markers, guidelines) is kept, '
+                       'so several sites, or an edited sheet, can be run the same way.')
 
     st.header('2. Units')
-    unit = st.selectbox('Concentration unit (ion columns)', chem.UNITS, index=0)
+    unit = st.selectbox('Concentration unit (ion columns)', chem.UNITS, key=opt('opt_unit', chem.UNITS[0]))
     st.caption('**Alkalinity** goes in as it appears on the lab report: total alkalinity, or '
                'bicarbonate and carbonate alkalinity, in mg/L as CaCO3 (whatever unit the ions are '
-               'in). Do not convert it. HCO3 and CO3 are calculated by PHREEQC from alkalinity and pH, '
-               'or from DIC and pH where there is no alkalinity.')
-    n_choice = st.selectbox('NO3 and NH4 columns hold', ['The ion (NO3, NH4)', 'As N (NO3-N, NH3-N)'])
-    p_choice = st.selectbox('PO4 column holds', ['Phosphate as PO4', 'Phosphate as P'])
-    dic_unit = st.selectbox('DIC column is in', ['mg/L as C', 'mmol/L'],
+               'in). Do not convert it. **HCO3 and CO3** are optional, in the ion unit: where you '
+               'enter them they are used as given. If both are blank, PHREEQC calculates them from '
+               'alkalinity and pH (or DIC and pH). If only one is entered, the other is the rest of '
+               'the alkalinity.')
+    N_OPTS = ['The ion (NO3, NH4)', 'As N (NO3-N, NH3-N)']
+    P_OPTS = ['Phosphate as PO4', 'Phosphate as P']
+    DIC_OPTS = ['mg/L as C', 'mmol/L']
+    n_choice = st.selectbox('NO3 and NH4 columns hold', N_OPTS, key=opt('opt_n_form', N_OPTS[0]))
+    p_choice = st.selectbox('PO4 column holds', P_OPTS, key=opt('opt_p_form', P_OPTS[0]))
+    dic_unit = st.selectbox('DIC column is in', DIC_OPTS, key=opt('opt_dic_unit', DIC_OPTS[0]),
                             help='DIC is only used for samples with no alkalinity.')
 
     st.header('3. Below the LOR')
     st.caption('Values below the limit of reporting (LOR) can be replaced by a fraction of the LOR. '
                'Anything not replaced is treated as missing and listed on the Data tab.')
-    lor_text = st.toggle('Replace "<" values (e.g. <0.05)', value=True,
+    lor_text = st.toggle('Replace "<" values (e.g. <0.05)', key=opt('opt_lor_text', True),
                          help='Concentration columns, TDS and any extra numeric column.')
-    lor_neg = st.toggle('Replace negative concentrations', value=True,
+    lor_neg = st.toggle('Replace negative concentrations', key=opt('opt_lor_neg', True),
                         help='Some labs report -0.05 to mean <0.05. Only the ion, alkalinity and DIC columns.')
     LOR_FRACTIONS = {'0.5 x LOR (half)': 0.5, '0.25 x LOR': 0.25, '0.1 x LOR': 0.1,
                      '1 x LOR (the LOR itself)': 1.0, 'Other': None}
-    lor_pick = st.selectbox('Replace with', list(LOR_FRACTIONS), index=0,
+    lor_pick = st.selectbox('Replace with', list(LOR_FRACTIONS), key=opt('opt_lor_pick', '0.5 x LOR (half)'),
                             disabled=not (lor_text or lor_neg))
     lor_fraction = LOR_FRACTIONS[lor_pick]
     if lor_fraction is None:
-        lor_fraction = st.number_input('Fraction of the LOR', min_value=0.001, max_value=1.0, value=0.5,
-                                       step=0.05, format='%.3f', disabled=not (lor_text or lor_neg))
+        lor_fraction = st.number_input('Fraction of the LOR', min_value=0.001, max_value=1.0,
+                                       step=0.05, format='%.3f', key=opt('opt_lor_frac', 0.5),
+                                       disabled=not (lor_text or lor_neg))
 
     st.header('4. Missing values')
     st.caption('Missing pH, temperature and alkalinity are filled so every sample can be '
                'speciated. Filled samples are drawn hollow wherever the fill affects the plot.')
-    ph_how = st.selectbox('Missing pH', ['Mean of the dataset', 'Fixed value'])
-    ph_val = st.number_input('Fixed pH', value=DEFAULT_PH, step=0.1) if ph_how == 'Fixed value' else DEFAULT_PH
-    t_how = st.selectbox('Missing temperature', ['Mean of the dataset', 'Fixed value'])
-    t_val = st.number_input('Fixed temperature (deg C)', value=DEFAULT_TEMP, step=0.5) if t_how == 'Fixed value' else DEFAULT_TEMP
-    h_how = st.selectbox('Missing alkalinity', ['Mean of the dataset', 'From charge balance', 'Fixed value'])
-    h_val = st.number_input('Fixed alkalinity (mg/L as CaCO3)', value=DEFAULT_ALK, step=10.0) if h_how == 'Fixed value' else DEFAULT_ALK
+    FILL2 = ['Mean of the dataset', 'Fixed value']
+    FILL3 = ['Mean of the dataset', 'From charge balance', 'Fixed value']
+    ph_how = st.selectbox('Missing pH', FILL2, key=opt('opt_ph_how', FILL2[0]))
+    ph_val = st.number_input('Fixed pH', step=0.1, key=opt('opt_ph_val', DEFAULT_PH)) if ph_how == 'Fixed value' else DEFAULT_PH
+    t_how = st.selectbox('Missing temperature', FILL2, key=opt('opt_t_how', FILL2[0]))
+    t_val = st.number_input('Fixed temperature (deg C)', step=0.5, key=opt('opt_t_val', DEFAULT_TEMP)) if t_how == 'Fixed value' else DEFAULT_TEMP
+    h_how = st.selectbox('Missing alkalinity', FILL3, key=opt('opt_h_how', FILL3[0]))
+    h_val = st.number_input('Fixed alkalinity (mg/L as CaCO3)', step=10.0, key=opt('opt_h_val', DEFAULT_ALK)) if h_how == 'Fixed value' else DEFAULT_ALK
 
     st.header('5. Plot options')
-    log_conc = st.checkbox('Log axes on concentration plots', value=False,
+    log_conc = st.checkbox('Log axes on concentration plots', key=opt('opt_log_conc', False),
                            help='Useful when fresh and saline samples share a plot.')
     letters = st.selectbox('Panel letters (multipanel figures)', ['None'] + list(plots.PANEL_LABELS),
-                           index=0, help='For the gallery pages and the Stiff grid.')
+                           key=opt('opt_letters', 'None'), help='For the gallery pages and the Stiff grid.')
     letters = None if letters == 'None' else letters
-    letters_pos = st.selectbox('Panel letter position', plots.PANEL_LABEL_POS, index=0,
-                               disabled=letters is None)
+    letters_pos = st.selectbox('Panel letter position', plots.PANEL_LABEL_POS,
+                               key=opt('opt_letters_pos', plots.PANEL_LABEL_POS[0]), disabled=letters is None)
 
 HOW = {'Mean of the dataset': 'mean', 'Fixed value': 'value', 'From charge balance': 'balance'}
 rules = (('pH', (HOW[ph_how], ph_val)), ('Temp', (HOW[t_how], t_val)), ('HCO3', (HOW[h_how], h_val)))
@@ -315,13 +377,11 @@ rules = (('pH', (HOW[ph_how], ph_val)), ('Temp', (HOW[t_how], t_val)), ('HCO3', 
 # %% load
 if use_example:
     raw = chem.example_data().astype(object)
+    data_name = 'Synthetic example data'
     st.info('Showing the synthetic example dataset. These are made-up samples.')
-elif uploaded is not None:
-    try:
-        raw = chem.read_upload(uploaded)
-    except Exception as exc:
-        st.error(f'Could not read that file: {exc}')
-        st.stop()
+elif dataset is not None:
+    data_name, raw = dataset
+    st.markdown(f'**Dataset:** {data_name}')
 else:
     st.info('Upload a filled template, or tick the synthetic example in the sidebar, to begin.')
     st.stop()
@@ -385,12 +445,12 @@ with st.expander(f'**Groups (Label): colours, markers and which to plot** ({len(
         names = marker_names if mk0 in marker_codes else marker_names + [mk0]
         codes = marker_codes if mk0 in marker_codes else marker_codes + [mk0]
         c1, c2, c3, c4 = st.columns([1, 3, 1.4, 2.6], vertical_alignment='center')
-        if c1.checkbox('Plot', value=True, key='grp_show_' + lab, label_visibility='collapsed'):
+        if c1.checkbox('Plot', key=opt('grp_show_' + lab, True), label_visibility='collapsed'):
             shown.append(lab)
         c2.write(lab)
-        col = c3.color_picker('Colour', value=mcolors.to_hex(col0), key='grp_col_' + lab,
+        col = c3.color_picker('Colour', key=opt('grp_col_' + lab, mcolors.to_hex(col0)),
                               label_visibility='collapsed')
-        mk_name = c4.selectbox('Marker', names, index=codes.index(mk0), key='grp_mk_' + lab,
+        mk_name = c4.selectbox('Marker', names, key=opt('grp_mk_' + lab, names[codes.index(mk0)], names),
                                label_visibility='collapsed')
         group_style[lab] = (col, codes[names.index(mk_name)])
     st.caption('Unticked groups are left off every plot. The tables and the results download '
@@ -403,10 +463,11 @@ v['Marker'] = v['Label'].map(lambda l: group_style[l][1])
 vp = v[v['Label'].isin(shown)]
 
 numeric_choices = chem.plottable(v)
+color_opts = ['Group (Label)'] + numeric_choices
 # radio buttons and not st.tabs, as tabs redraw every figure on every click
 VIEWS = ['Data and checks', 'Guidelines', 'Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot',
          'Export']
-view = st.radio('View', VIEWS, horizontal=True, label_visibility='collapsed')
+view = st.radio('View', VIEWS, horizontal=True, label_visibility='collapsed', key=opt('opt_view', VIEWS[0], VIEWS))
 
 # %% view: data
 if view == 'Data and checks':
@@ -418,12 +479,15 @@ if view == 'Data and checks':
     c4.metric('Filled samples', n_filled)
 
     summary_cols = ['Sample', 'Label', 'Water type', 'CBE (%)', 'TDS (mg/L)', 'pH',
-                    'Alkalinity (mg/L as CaCO3)', 'HCO3 (mg/L)', 'CO3 (mg/L)', 'log pCO2',
+                    'Alkalinity (mg/L as CaCO3)', 'HCO3 (mg/L)', 'CO3 (mg/L)', 'HCO3, CO3 from', 'log pCO2',
                     'Ionic strength (mol/kgw)'] + [c for c in v.columns if c.startswith('SI ') and v[c].notna().any()] + ['Filled']
     st.subheader('Summary')
     st.dataframe(v[summary_cols].round(3), width='stretch', hide_index=True)
-    st.caption('HCO3 and CO3 are calculated by PHREEQC from the alkalinity and pH you supplied '
-               '(each includes its ion pairs, so HCO3 + CO3 adds up to the carbonate alkalinity). '
+    st.caption('HCO3 and CO3 are your values where you entered them. Where you entered only one, '
+               'the other is the rest of the alkalinity. Where you entered neither, PHREEQC calculates '
+               'both from the alkalinity and pH (each includes its ion pairs, so HCO3 + 2 CO3, in '
+               'meq/L, adds up to the carbonate alkalinity). "HCO3, CO3 from" shows which. '
+               'Saturation indices and pCO2 always come from the alkalinity (or DIC) and pH. '
                'CBE is signed: positive means excess cations. TDS is the measured value where '
                'given, otherwise the sum of ions with bicarbonate x 0.4917.')
 
@@ -439,23 +503,27 @@ if view == 'Data and checks':
 
 # %% view: guidelines
 GUIDE_DEFAULT = guidelines.set_names()[:3] + [guidelines.REGIONAL_NAME]
-guide_sets = st.session_state.get('guide_sets', GUIDE_DEFAULT)
-guide_region = st.session_state.get('guide_region', 'Tropical Australia')
-guide_eco = st.session_state.get('guide_eco', 'Lowland river')
-if guide_eco not in guidelines.REGIONS[guide_region]:
-    guide_eco = list(guidelines.REGIONS[guide_region])[0]
+
+
+
+def _eco_key(region):
+    ecos = list(guidelines.REGIONS[region])
+    return opt('guide_eco', 'Lowland river' if 'Lowland river' in ecos else ecos[0], ecos), ecos
+
+
+guide_sets = st.session_state[opt('guide_sets', GUIDE_DEFAULT, guidelines.set_names())]
+guide_region = st.session_state[opt('guide_region', 'Tropical Australia', list(guidelines.REGIONS))]
+guide_eco = st.session_state[_eco_key(guide_region)[0]]
 if view == 'Guidelines':
     st.subheader('Comparison with Australian water quality guidelines')
     st.write('Drinking water guidelines and environmental (aquatic ecosystem) guidelines for fresh, '
              'estuarine and marine waters. Choose the sets that suit the water body.')
-    guide_sets = st.multiselect('Guideline sets', guidelines.set_names(), default=guide_sets, key='guide_sets')
+    guide_sets = st.multiselect('Guideline sets', guidelines.set_names(), key='guide_sets')
     if guidelines.REGIONAL_NAME in guide_sets:
         c1, c2 = st.columns(2)
-        guide_region = c1.selectbox('Region', list(guidelines.REGIONS),
-                                    index=list(guidelines.REGIONS).index(guide_region), key='guide_region')
-        ecos = list(guidelines.REGIONS[guide_region])
-        guide_eco = c2.selectbox('Ecosystem type', ecos,
-                                 index=ecos.index(guide_eco) if guide_eco in ecos else 0, key='guide_eco',
+        guide_region = c1.selectbox('Region', list(guidelines.REGIONS), key='guide_region')
+        eco_key, ecos = _eco_key(guide_region)
+        guide_eco = c2.selectbox('Ecosystem type', ecos, key=eco_key,
                                  help='Estuaries are the nearest match for brackish water.')
     if not guide_sets:
         st.info('Choose at least one guideline set.')
@@ -491,9 +559,9 @@ if view in PLOT_VIEWS and vp.empty:
 # %% view: Piper
 if view == 'Piper':
     c1, c2, c3 = st.columns(3)
-    p_color = c1.selectbox('Colour by', ['Group (Label)'] + numeric_choices, key='piper_color')
-    p_types = c2.checkbox('Water-type labels', value=True)
-    p_legend = c3.checkbox('Legend for the coloured fields', value=False)
+    p_color = c1.selectbox('Colour by', color_opts, key=opt('piper_color', color_opts[0], color_opts))
+    p_types = c2.checkbox('Water-type labels', key=opt('opt_piper_types', True))
+    p_legend = c3.checkbox('Legend for the coloured fields', key=opt('opt_piper_legend', False))
     fig = plots.piper(vp, color_by=None if p_color.startswith('Group') else p_color,
                       water_legend=p_legend, show_types=p_types)
     show(fig, 'piper', 'dl_piper')
@@ -503,11 +571,13 @@ if view == 'Piper':
 
 # %% view: classical
 if view == 'Classical diagrams':
-    kind = st.selectbox('Diagram', ['Schoeller', 'Stiff'] + list(plots.WQ_DIAGRAMS))
+    kinds = ['Schoeller', 'Stiff'] + list(plots.WQ_DIAGRAMS)
+    kind = st.selectbox('Diagram', kinds, key=opt('opt_classical', kinds[0], kinds))
     if kind == 'Schoeller':
         show(plots.schoeller(vp), 'schoeller', 'dl_schoeller')
     elif kind == 'Stiff':
-        chosen = st.multiselect('Samples', list(vp['Sample']), default=list(vp['Sample'][:12]),
+        samples = list(vp['Sample'])
+        chosen = st.multiselect('Samples', samples, key=opt('opt_stiff_samples', samples[:12], samples),
                                 max_selections=MAX_STIFF)
         fig = plots.stiff(vp, chosen, letters=letters, letters_pos=letters_pos)
         if fig is not None:
@@ -527,8 +597,9 @@ if view == 'Classical diagrams':
 # %% view: gallery
 if view == 'Diagnostic gallery':
     c1, c2 = st.columns(2)
-    group = c1.selectbox('Plot set', list(plots.GALLERY))
-    g_color = c2.selectbox('Colour by', ['Group (Label)'] + numeric_choices, key='gallery_color')
+    sets = list(plots.GALLERY)
+    group = c1.selectbox('Plot set', sets, key=opt('opt_gallery_set', sets[0], sets))
+    g_color = c2.selectbox('Colour by', color_opts, key=opt('gallery_color', color_opts[0], color_opts))
     panels = [p for p in plots.GALLERY[group] if plots.available(vp, p)]
     skipped = len(plots.GALLERY[group]) - len(panels)
     if not panels:
@@ -548,17 +619,16 @@ if view == 'Diagnostic gallery':
 # %% view: custom
 if view == 'Custom plot':
     c1, c2, c3 = st.columns(3)
-    cx = c1.selectbox('x axis', numeric_choices,
-                      index=numeric_choices.index('Cl (mmol/L)') if 'Cl (mmol/L)' in numeric_choices else 0)
-    cy = c2.selectbox('y axis', numeric_choices,
-                      index=numeric_choices.index('Na (mmol/L)') if 'Na (mmol/L)' in numeric_choices else 0)
-    cc = c3.selectbox('Colour by', ['Group (Label)'] + numeric_choices, key='custom_color')
+    nc = numeric_choices
+    cx = c1.selectbox('x axis', nc, key=opt('opt_custom_x', 'Cl (mmol/L)' if 'Cl (mmol/L)' in nc else nc[0], nc))
+    cy = c2.selectbox('y axis', nc, key=opt('opt_custom_y', 'Na (mmol/L)' if 'Na (mmol/L)' in nc else nc[0], nc))
+    cc = c3.selectbox('Colour by', color_opts, key=opt('custom_color', color_opts[0], color_opts))
     c1, c2, c3, c4, c5 = st.columns(5)
-    xlog = c1.checkbox('Log x')
-    ylog = c2.checkbox('Log y')
-    one = c3.checkbox('1:1 line')
-    zero = c4.checkbox('y = 0 line')
-    ann = c5.checkbox('Label samples')
+    xlog = c1.checkbox('Log x', key=opt('opt_custom_xlog', False))
+    ylog = c2.checkbox('Log y', key=opt('opt_custom_ylog', False))
+    one = c3.checkbox('1:1 line', key=opt('opt_custom_one', False))
+    zero = c4.checkbox('y = 0 line', key=opt('opt_custom_zero', False))
+    ann = c5.checkbox('Label samples', key=opt('opt_custom_labels', False))
     fig = plots.custom(vp, cx, cy, xlog=xlog, ylog=ylog, one_to_one=one, zero_line=zero, annotate=ann,
                        color_by=None if cc.startswith('Group') else cc)
     show(fig, 'custom_plot', 'dl_custom')
@@ -570,12 +640,44 @@ if view == 'Export':
     lor_used = ('Not replaced' if not (lor_text or lor_neg) else
                 f'{lor_fraction:g} x LOR for ' + ' and '.join(
                     [w for w, on in (('"<" values', lor_text), ('negative concentrations', lor_neg)) if on]))
-    settings = pd.DataFrame({'Setting': ['App version', 'Database', 'Input unit', 'Alkalinity', 'N species', 'PO4 column', 'DIC unit',
-                                         'Below the LOR', 'Missing pH', 'Missing temperature', 'Missing alkalinity'],
-                             'Value': [APP_VERSION, 'phreeqc.dat (phreeqpython)', unit, 'mg/L as CaCO3; HCO3 and CO3 from PHREEQC (see "Alkalinity from" column)', n_choice, p_choice, dic_unit,
-                                       lor_used, ph_how + (f' ({ph_val})' if ph_how == 'Fixed value' else ''),
-                                       t_how + (f' ({t_val})' if t_how == 'Fixed value' else ''),
-                                       h_how + (f' ({h_val} mg/L as CaCO3)' if h_how == 'Fixed value' else '')]})
+    ss = st.session_state
+    guide_txt = '; '.join(guide_sets) if guide_sets else 'None'
+    if guidelines.REGIONAL_NAME in guide_sets:
+        guide_txt += f' (region: {guide_region}; ecosystem: {guide_eco})'
+    rows = [
+        ('Run', 'App version', APP_VERSION),
+        ('Run', 'Run at (UTC)', pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M')),
+        ('Run', 'Dataset', data_name),
+        ('Run', 'Samples', len(v)),
+        ('Run', 'Database', 'phreeqc.dat (phreeqpython)'),
+        ('Units', 'Ion columns', unit),
+        ('Units', 'Alkalinity', 'mg/L as CaCO3; HCO3 and CO3 as entered where given, otherwise from '
+                                'PHREEQC (see the "Alkalinity from" and "HCO3, CO3 from" columns)'),
+        ('Units', 'NO3 and NH4 columns', n_choice),
+        ('Units', 'PO4 column', p_choice),
+        ('Units', 'DIC column', dic_unit),
+        ('Below the LOR', 'Replace "<" values', 'Yes' if lor_text else 'No'),
+        ('Below the LOR', 'Replace negative concentrations', 'Yes' if lor_neg else 'No'),
+        ('Below the LOR', 'Replaced with', f'{lor_fraction:g} x LOR' if (lor_text or lor_neg) else 'Not replaced'),
+        ('Missing values', 'Missing pH', ph_how + (f' ({ph_val})' if ph_how == 'Fixed value' else '')),
+        ('Missing values', 'Missing temperature', t_how + (f' ({t_val} deg C)' if t_how == 'Fixed value' else '')),
+        ('Missing values', 'Missing alkalinity', h_how + (f' ({h_val} mg/L as CaCO3)' if h_how == 'Fixed value' else '')),
+        ('Groups', 'Plotted', ', '.join(shown) if shown else 'None'),
+        ('Groups', 'Not plotted', ', '.join(l for l in labels if l not in shown) or 'None'),
+        ('Groups', 'Colours and markers', 'See the Groups sheet'),
+        ('Plots', 'Log axes on concentration plots', 'Yes' if log_conc else 'No'),
+        ('Plots', 'Panel letters', letters or 'None'),
+        ('Plots', 'Panel letter position', letters_pos if letters else ''),
+        ('Plots', 'Piper: colour by', ss.get('piper_color', 'Group (Label)')),
+        ('Plots', 'Piper: water-type labels', 'Yes' if ss.get('opt_piper_types', True) else 'No'),
+        ('Plots', 'Piper: legend for the coloured fields', 'Yes' if ss.get('opt_piper_legend', False) else 'No'),
+        ('Plots', 'Gallery: colour by', ss.get('gallery_color', 'Group (Label)')),
+        ('Plots', 'Custom plot', f"x = {ss.get('opt_custom_x', '')}, y = {ss.get('opt_custom_y', '')}, "
+                                 f"colour by {ss.get('custom_color', 'Group (Label)')}"),
+        ('Plots', 'Figure zip resolution (dpi)', ss.get('opt_dpi', 300)),
+        ('Guidelines', 'Sets', guide_txt),
+    ]
+    settings = pd.DataFrame(rows, columns=['Section', 'Setting', 'Value'])
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as xl:
         v[out_cols].to_excel(xl, sheet_name='Results', index=False)
@@ -592,14 +694,17 @@ if view == 'Export':
             g_summary, g_flags = guidelines.assess(v, guide_sets, guide_region, guide_eco)
             g_summary.to_excel(xl, sheet_name='Guidelines', index=False)
             g_flags.to_excel(xl, sheet_name='Guidelines by sample', index=False)
-    st.download_button('Download results (.xlsx)', buf.getvalue(), file_name='hydrochem_workbench_results.xlsx',
+    stem = os.path.splitext(data_name)[0].replace(' ', '_') if not use_example else 'example'
+    st.download_button('Download results (.xlsx)', buf.getvalue(), file_name=f'{stem}_hydrochem_results.xlsx',
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     st.caption('Every derived variable, saturation index and flag for all samples (including any '
-               'groups not plotted), plus the settings, group styles and replaced below-LOR values, so '
-               'the run can be reproduced. The figure zip uses the plotted groups only.')
+               'groups not plotted). The Settings sheet records every option used (units, below-LOR, '
+               'missing values, groups, plot options, guidelines), with the group colours and markers '
+               'and any replaced below-LOR values on their own sheets, so the run can be reproduced. '
+               'The figure zip uses the plotted groups only. File names start with the dataset name.')
 
     st.subheader('All figures')
-    dpi = st.selectbox('Resolution', [300, 600], index=0)
+    dpi = st.selectbox('Resolution', [300, 600], key=opt('opt_dpi', 300, [300, 600]))
     if vp.empty:
         st.info('No groups are ticked to plot, so there are no figures to build.')
     elif st.button('Build a zip of every figure'):
@@ -614,5 +719,5 @@ if view == 'Export':
                                           letters=letters, letters_pos=letters_pos)
                     fname = gname.lower().replace(' ', '_').replace('/', '-')
                     z.writestr(f'gallery/{fname}_{k // PANELS_PER_PAGE + 1}.png', plots.fig_png(f, dpi))
-        st.download_button('Download figures (.zip)', zbuf.getvalue(), file_name='hydrochem_workbench_figures.zip',
+        st.download_button('Download figures (.zip)', zbuf.getvalue(), file_name=f'{stem}_hydrochem_figures.zip',
                            mime='application/zip')
