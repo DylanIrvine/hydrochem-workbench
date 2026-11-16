@@ -29,6 +29,21 @@ def test_app_runs_on_example_data(tmp_path, monkeypatch):
     ms = [m for m in at.multiselect if m.label == 'Guideline sets'][0]
     ms.set_value(ms.options).run()
     assert not at.exception
+    # bar chart: every parameter, then every guideline for one of them, colours and options
+    for var in at.selectbox(key='opt_gchart_var').options:
+        at.selectbox(key='opt_gchart_var').select(var).run()
+        assert not at.exception
+    at.selectbox(key='opt_gchart_var').select('Cl (mg/L)').run()
+    for rule in at.selectbox(key='opt_gchart_rule').options:
+        at.selectbox(key='opt_gchart_rule').select(rule).run()
+        assert not at.exception
+    at.radio(key='opt_gchart_barmode').set_value('One colour').run()
+    at.color_picker(key='opt_gchart_linecol').pick('#00ff00').run()
+    at.checkbox(key='opt_gchart_hl').check().run()
+    at.checkbox(key='opt_gchart_log').check().run()
+    at.checkbox(key='opt_gchart_sort').check().run()
+    assert not at.exception
+    assert any(b.label == 'Download PNG (600 dpi)' for b in at.get('download_button'))
     go('Piper')
     go('Classical diagrams')
     for diagram in ['Stiff', 'Durov', 'Gibbs', 'Chadha', 'HFE-D']:

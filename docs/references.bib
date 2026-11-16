@@ -1,0 +1,297 @@
+% Hydrochem Workbench: references for the app, the software it is built on,
+% and the reports and guidelines it uses.
+%
+% Checked November 2026. Journal articles and the USGS report were checked
+% against their DOI records (Crossref); guideline documents against the
+% issuing agency's own pages or documents. Notes in each entry say where a
+% detail could not be fully confirmed.
+%
+% Software entries use @software (biblatex). For classic BibTeX styles that
+% do not know @software, change it to @misc.
+
+% ---------------------------------------------------------------------------
+% The app
+% ---------------------------------------------------------------------------
+
+@software{irvine2026hydrochem,
+  author    = {Irvine, Dylan J.},
+  title     = {Hydrochem Workbench},
+  year      = {2026},
+  version   = {0.10.0},
+  publisher = {Charles Darwin University},
+  url       = {https://hydrochem-workbench.streamlit.app/},
+  note      = {Web application. Update the version to the one used.}
+}
+
+% ---------------------------------------------------------------------------
+% Geochemical calculations
+% ---------------------------------------------------------------------------
+
+@techreport{parkhurst2013phreeqc,
+  author      = {Parkhurst, David L. and Appelo, C. A. J.},
+  title       = {Description of input and examples for {PHREEQC} version 3: A computer program for speciation, batch-reaction, one-dimensional transport, and inverse geochemical calculations},
+  institution = {U.S. Geological Survey},
+  type        = {Techniques and Methods},
+  number      = {book 6, chap. A43},
+  year        = {2013},
+  pages       = {497},
+  doi         = {10.3133/tm6A43},
+  url         = {https://pubs.usgs.gov/tm/06/a43/}
+}
+
+@article{charlton2011iphreeqc,
+  author  = {Charlton, Scott R. and Parkhurst, David L.},
+  title   = {Modules based on the geochemical model {PHREEQC} for use in scripting and programming languages},
+  journal = {Computers \& Geosciences},
+  year    = {2011},
+  volume  = {37},
+  number  = {10},
+  pages   = {1653--1663},
+  doi     = {10.1016/j.cageo.2011.02.005},
+  note    = {IPhreeqc. phreeqpython wraps VIPhreeqc, which is derived from IPhreeqc.}
+}
+
+@software{vitens_phreeqpython,
+  author  = {{Vitens}},
+  title   = {phreeqpython: Object-oriented python wrapper for the {VIPhreeqc} module},
+  url     = {https://github.com/Vitens/phreeqpython},
+  license = {Apache-2.0},
+  note    = {No paper or DOI. Add the version used (requirements.txt asks for 1.5.5 or later).}
+}
+
+% ---------------------------------------------------------------------------
+% Python packages
+% ---------------------------------------------------------------------------
+
+@article{yang2022wqchartpy,
+  author  = {Yang, Jing and Liu, Honghua and Tang, Zhonghua and Peeters, Luk and Ye, Ming},
+  title   = {Visualization of aqueous geochemical data using {Python} and {WQChartPy}},
+  journal = {Groundwater},
+  year    = {2022},
+  volume  = {60},
+  number  = {4},
+  pages   = {555--564},
+  doi     = {10.1111/gwat.13185}
+}
+
+@article{harris2020numpy,
+  author  = {Harris, Charles R. and Millman, K. Jarrod and van der Walt, St{\'e}fan J. and Gommers, Ralf and Virtanen, Pauli and Cournapeau, David and Wieser, Eric and Taylor, Julian and Berg, Sebastian and Smith, Nathaniel J. and Kern, Robert and Picus, Matti and Hoyer, Stephan and van Kerkwijk, Marten H. and Brett, Matthew and Haldane, Allan and Fern{\'a}ndez del R{\'i}o, Jaime and Wiebe, Mark and Peterson, Pearu and G{\'e}rard-Marchant, Pierre and Sheppard, Kevin and Reddy, Tyler and Weckesser, Warren and Abbasi, Hameer and Gohlke, Christoph and Oliphant, Travis E.},
+  title   = {Array programming with {NumPy}},
+  journal = {Nature},
+  year    = {2020},
+  volume  = {585},
+  number  = {7825},
+  pages   = {357--362},
+  doi     = {10.1038/s41586-020-2649-2}
+}
+
+@inproceedings{mckinney2010pandas,
+  author    = {McKinney, Wes},
+  title     = {Data structures for statistical computing in {Python}},
+  booktitle = {Proceedings of the 9th Python in Science Conference},
+  editor    = {van der Walt, St{\'e}fan and Millman, Jarrod},
+  year      = {2010},
+  pages     = {56--61},
+  doi       = {10.25080/Majora-92bf1922-00a}
+}
+
+@software{pandas_zenodo,
+  author    = {{The pandas development team}},
+  title     = {pandas-dev/pandas: Pandas},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.3509134},
+  url       = {https://doi.org/10.5281/zenodo.3509134},
+  note      = {Concept DOI (all versions). The pandas project asks for this and McKinney (2010) to be cited together; Zenodo also has a DOI for each version.}
+}
+
+@article{hunter2007matplotlib,
+  author  = {Hunter, John D.},
+  title   = {Matplotlib: A {2D} graphics environment},
+  journal = {Computing in Science \& Engineering},
+  year    = {2007},
+  volume  = {9},
+  number  = {3},
+  pages   = {90--95},
+  doi     = {10.1109/MCSE.2007.55}
+}
+
+@software{streamlit,
+  author  = {{Snowflake Inc.}},
+  title   = {Streamlit},
+  url     = {https://streamlit.io},
+  license = {Apache-2.0},
+  note    = {No paper or DOI. Add the version used.}
+}
+
+% ---------------------------------------------------------------------------
+% Diagrams and indices
+% ---------------------------------------------------------------------------
+
+@article{piper1944,
+  author  = {Piper, Arthur M.},
+  title   = {A graphic procedure in the geochemical interpretation of water-analyses},
+  journal = {Eos, Transactions American Geophysical Union},
+  year    = {1944},
+  volume  = {25},
+  number  = {6},
+  pages   = {914--928},
+  doi     = {10.1029/TR025i006p00914}
+}
+
+@article{stiff1951,
+  author  = {Stiff, Jr., Henry A.},
+  title   = {The interpretation of chemical water analysis by means of patterns},
+  journal = {Journal of Petroleum Technology},
+  year    = {1951},
+  volume  = {3},
+  number  = {10},
+  pages   = {15--17},
+  doi     = {10.2118/951376-G},
+  note    = {Pages as usually cited. The Crossref record gives the pages as "15-3".}
+}
+
+@article{durov1948,
+  author  = {Durov, S. A.},
+  title   = {Natural waters and graphic representation of their composition},
+  journal = {Doklady Akademii Nauk SSSR},
+  year    = {1948},
+  volume  = {59},
+  pages   = {87--90},
+  note    = {No DOI. Details as commonly cited; not checked against the original.}
+}
+
+@article{gibbs1970,
+  author  = {Gibbs, Ronald J.},
+  title   = {Mechanisms controlling world water chemistry},
+  journal = {Science},
+  year    = {1970},
+  volume  = {170},
+  number  = {3962},
+  pages   = {1088--1090},
+  doi     = {10.1126/science.170.3962.1088}
+}
+
+@article{chadha1999,
+  author  = {Chadha, D. K.},
+  title   = {A proposed new diagram for geochemical classification of natural waters and interpretation of chemical data},
+  journal = {Hydrogeology Journal},
+  year    = {1999},
+  volume  = {7},
+  number  = {5},
+  pages   = {431--439},
+  doi     = {10.1007/s100400050216}
+}
+
+@article{gaillardet1999,
+  author  = {Gaillardet, J. and Dupr{\'e}, B. and Louvat, P. and All{\`e}gre, C. J.},
+  title   = {Global silicate weathering and {CO$_2$} consumption rates deduced from the chemistry of large rivers},
+  journal = {Chemical Geology},
+  year    = {1999},
+  volume  = {159},
+  number  = {1--4},
+  pages   = {3--30},
+  doi     = {10.1016/S0009-2541(99)00031-5}
+}
+
+@article{gimenezforcada2010,
+  author  = {Gim{\'e}nez-Forcada, Elena},
+  title   = {Dynamic of sea water interface using hydrochemical facies evolution diagram},
+  journal = {Groundwater},
+  year    = {2010},
+  volume  = {48},
+  number  = {2},
+  pages   = {212--216},
+  doi     = {10.1111/j.1745-6584.2009.00649.x}
+}
+
+@book{hounslow1995,
+  author    = {Hounslow, Arthur W.},
+  title     = {Water Quality Data: Analysis and Interpretation},
+  publisher = {CRC Lewis Publishers},
+  address   = {Boca Raton, FL},
+  year      = {1995},
+  isbn      = {978-0-87371-676-5},
+  note      = {Source of the source-rock ratio thresholds.}
+}
+
+@book{richards1954,
+  editor    = {Richards, L. A.},
+  title     = {Diagnosis and Improvement of Saline and Alkali Soils},
+  series    = {Agriculture Handbook},
+  number    = {60},
+  publisher = {United States Department of Agriculture},
+  address   = {Washington, DC},
+  year      = {1954},
+  note      = {Sodium adsorption ratio and the salinity and sodium hazard classes.}
+}
+
+% ---------------------------------------------------------------------------
+% Water quality guidelines
+% ---------------------------------------------------------------------------
+
+@book{who2026gdwq,
+  author    = {{World Health Organization}},
+  title     = {Guidelines for Drinking-water Quality: Fourth Edition Incorporating the First, Second and Third Addenda},
+  publisher = {World Health Organization},
+  address   = {Geneva},
+  year      = {2026},
+  isbn      = {978-92-4-012122-5},
+  url       = {https://www.who.int/publications/i/item/9789240121225},
+  note      = {Health-based values from Table A3.3; acceptability values from chapter 10. Licence: CC BY-NC-SA 3.0 IGO.}
+}
+
+@book{ayers1985fao,
+  author    = {Ayers, R. S. and Westcot, D. W.},
+  title     = {Water Quality for Agriculture},
+  series    = {FAO Irrigation and Drainage Paper},
+  number    = {29 Rev. 1},
+  publisher = {Food and Agriculture Organization of the United Nations},
+  address   = {Rome},
+  year      = {1985},
+  isbn      = {92-5-102263-1},
+  url       = {https://www.fao.org/3/t0234e/t0234e00.htm},
+  note      = {Table 1, guidelines for interpretation of water quality for irrigation.}
+}
+
+@misc{anzg2018,
+  author       = {{ANZG}},
+  title        = {Australian and New Zealand Guidelines for Fresh and Marine Water Quality},
+  howpublished = {Australian and New Zealand Governments and Australian state and territory governments, Canberra, ACT},
+  year         = {2018},
+  url          = {https://www.waterquality.gov.au/anz-guidelines}
+}
+
+@book{anzecc2000,
+  author    = {{ANZECC and ARMCANZ}},
+  title     = {Australian and New Zealand Guidelines for Fresh and Marine Water Quality. Volume 1, The Guidelines (Chapters 1--7)},
+  series    = {National Water Quality Management Strategy Paper},
+  number    = {4},
+  publisher = {Australian and New Zealand Environment and Conservation Council and Agriculture and Resource Management Council of Australia and New Zealand},
+  address   = {Canberra},
+  year      = {2000},
+  month     = oct,
+  note      = {Source of the regional nutrient, pH and EC values and the pre-2018 toxicant values used in the app.}
+}
+
+@techreport{anzg2025nitrate,
+  author      = {{ANZG}},
+  title       = {Toxicant default guideline values for aquatic ecosystem protection: Nitrate in freshwater},
+  institution = {Australian and New Zealand Guidelines for Fresh and Marine Water Quality. Australian and New Zealand Governments and Australian state and territory governments},
+  address     = {Canberra, ACT},
+  type        = {Technical brief},
+  year        = {2025},
+  month       = jun,
+  url         = {https://www.waterquality.gov.au/anz-guidelines/guideline-values/default/water-quality-toxicants/toxicants/nitrate-fresh-2025}
+}
+
+@book{nhmrc2011adwg,
+  author    = {{NHMRC and NRMMC}},
+  title     = {Australian Drinking Water Guidelines Paper 6, National Water Quality Management Strategy},
+  publisher = {National Health and Medical Research Council and National Resource Management Ministerial Council, Commonwealth of Australia},
+  address   = {Canberra},
+  year      = {2011},
+  edition   = {Version 4.0, updated June 2025},
+  isbn      = {1864965118},
+  url       = {https://guidelines.nhmrc.gov.au/australian-drinking-water-guidelines},
+  note      = {Version as stated on the NHMRC copyright page; some pages of the online version still show v3.9. Update the version to the one consulted.}
+}

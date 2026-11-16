@@ -41,9 +41,14 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    drinking water (ADWG health and aesthetic), ANZG toxicant default guideline
    values for fresh and marine ecosystems (95% protection), and the ANZECC 2000
    nutrient, pH and EC values by region (tropical, south-east, south-west and
-   south central Australia) and ecosystem type, including estuaries. All the
-   numbers are in `core/guidelines.py` with their sources. It is a screening
-   comparison, not a compliance assessment.
+   south central Australia) and ecosystem type, including estuaries. Two
+   international sets are also available: the WHO Guidelines for drinking-water
+   quality (2026; health and acceptability values) and the FAO irrigation
+   guidelines (Ayers and Westcot 1985), rated as no, slight to moderate, or
+   severe restriction on use, including infiltration from SAR and EC together.
+   A bar chart plots any parameter against any of these guideline values, with
+   user-chosen colours. All the numbers are in `core/guidelines.py` with their
+   sources. It is a screening comparison, not a compliance assessment.
 5. **Plots.**
    - Piper, in the coloured-field style from `PiperScript.py`
    - Schoeller and Stiff, native, same style
@@ -69,14 +74,16 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
 The app keeps an uploaded dataset in memory for the browser session only and
 never writes it to disk. The one thing it records is a running total of
 sessions that processed data (`core/usage.py`). For that total to survive a
-redeploy on Streamlit Cloud, add Upstash Redis secrets:
+restart on Streamlit Cloud, add Upstash Redis secrets in either layout:
 
-    [redis]
-    rest_url = "https://....upstash.io"
-    rest_token = "..."
+    [upstash]
+    url = "https://....upstash.io"
+    token = "..."
 
-The key defaults to `hydrochem:runs`, so it can share a database with the
-HydroSTITCH counter. `.streamlit/config.toml` turns off Streamlit's browser
+or `[redis]` with `rest_url` and `rest_token` (as in HydroSTITCH). Without them
+the count lives in a local file that is wiped whenever the app restarts, and the
+app says so under the count. The key defaults to `hydrochem:runs`, so it can
+share a database with the other apps' counters. `.streamlit/config.toml` turns off Streamlit's browser
 usage statistics.
 
 ## Layout
@@ -114,7 +121,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D. (2026). Hydrochem Workbench (version 0.9.0) [Web application].
+Irvine, D. (2026). Hydrochem Workbench (version 0.10.0) [Web application].
 Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).

@@ -7,7 +7,8 @@
 # version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
 
 # core/guidelines.py
-# Australian water quality guideline values and the comparison against them.
+# Water quality guideline values (Australian, WHO and FAO) and the comparison
+# against them.
 # All values are in the table below so they are easy to check and update.
 # 'var' is a column in the results table (v). Concentrations are mg/L.
 
@@ -19,6 +20,10 @@ import pandas as pd
 ADWG = 'NHMRC, Australian Drinking Water Guidelines, Table 10.6 (online version, checked Nov 2026)'
 ANZECC = 'ANZECC & ARMCANZ (2000), Table 3.4.1'
 ANZG_NO3 = 'ANZG (2025) technical brief: nitrate in freshwater'
+WHO_GV = ('WHO (2026), Guidelines for drinking-water quality, 4th ed. incorporating the 1st, 2nd and '
+          '3rd addenda, Table A3.3')
+WHO_ACC = 'WHO (2026), Guidelines for drinking-water quality, chapter 10 (acceptability aspects)'
+FAO29 = 'Ayers and Westcot (1985), FAO Irrigation and Drainage Paper 29 Rev. 1, Table 1'
 
 # %% drinking water and toxicants
 # kind: 'max' (flag above value), 'range' (flag outside low-high)
@@ -31,6 +36,7 @@ SETS = {
         dict(var='Mn (mg/L)', name='Manganese', kind='max', value=0.1, source=ADWG,
              note='Lowered from 0.5 mg/L in the 2025 update.'),
         dict(var='Ba (mg/L)', name='Barium', kind='max', value=2, source=ADWG),
+        dict(var='B (mg/L)', name='Boron', kind='max', value=4, source=ADWG),
     ],
     'Drinking water: aesthetic (ADWG)': [
         dict(var='TDS (mg/L)', name='Total dissolved solids', kind='max', value=600, source=ADWG),
@@ -62,7 +68,67 @@ SETS = {
         dict(var='Mn (mg/L)', name='Manganese', kind='max', value=0.08, source=ANZECC,
              note='Low reliability value. A 2025 ANZG draft proposes 0.30 mg/L.'),
     ],
+    # international. WHO values are a reference for national standards, not standards themselves
+    'Drinking water: health (WHO)': [
+        dict(var='NO3 (mg/L)', name='Nitrate (as NO3)', kind='max', value=50, source=WHO_GV,
+             note='Based on short-term effects, but protective for long-term effects.'),
+        dict(var='F (mg/L)', name='Fluoride', kind='max', value=1.5, source=WHO_GV),
+        dict(var='Ba (mg/L)', name='Barium', kind='max', value=1.3, source=WHO_GV),
+        dict(var='Mn (mg/L)', name='Manganese', kind='max', value=0.08, source=WHO_GV,
+             note='Provisional; for total manganese. WHO advises considering aesthetic as well as '
+                  'health aspects when setting national standards.'),
+        dict(var='B (mg/L)', name='Boron', kind='max', value=2.4, source=WHO_GV),
+    ],
+    'Drinking water: acceptability (WHO)': [
+        dict(var='TDS (mg/L)', name='Total dissolved solids', kind='max', value=1000, source=WHO_ACC,
+             note='Increasingly unpalatable above about 1000 mg/L; below about 600 mg/L is good.'),
+        dict(var='Cl (mg/L)', name='Chloride', kind='max', value=250, source=WHO_ACC,
+             note='Taste threshold 200 to 300 mg/L depending on the cation.'),
+        dict(var='Na (mg/L)', name='Sodium', kind='max', value=200, source=WHO_ACC,
+             note='Average taste threshold.'),
+        dict(var='SO4 (mg/L)', name='Sulfate', kind='max', value=250, source=WHO_ACC,
+             note='Taste impairment minimal below this.'),
+        dict(var='Hardness (mg/L as CaCO3)', name='Hardness (as CaCO3)', kind='max', value=200, source=WHO_ACC,
+             note='Scale deposition above about this.'),
+        dict(var='Fe (mg/L)', name='Iron', kind='max', value=0.3, source=WHO_ACC,
+             note='Staining of laundry and plumbing fixtures.'),
+        dict(var='Mn (mg/L)', name='Manganese', kind='max', value=0.02, source=WHO_ACC,
+             note='Staining by manganese oxides from about this level.'),
+        dict(var='Ammonia as NH3 (mg/L)', name='Ammonia (as NH3)', kind='max', value=1.5, source=WHO_ACC,
+             note='Odour threshold at alkaline pH.'),
+        dict(var='pH', name='pH', kind='range', low=6.5, high=8.5, source=WHO_ACC,
+             note='WHO gives no guideline value; 6.5 to 8.5 is the usual range it describes.'),
+    ],
+    # graded: 'slight' and 'severe' are the lower limits of the slight-to-moderate and
+    # severe restriction classes (severe None where FAO gives none)
+    'Irrigation: degree of restriction on use (FAO)': [
+        dict(var='EC', name='Salinity, ECw (uS/cm)', kind='graded', slight=700, severe=3000, source=FAO29,
+             note='FAO gives 0.7 and 3.0 dS/m.'),
+        dict(var='TDS (mg/L)', name='Salinity, TDS', kind='graded', slight=450, severe=2000, source=FAO29),
+        dict(var='SAR', name='Infiltration (SAR with ECw)', kind='sar_ec', source=FAO29,
+             note='Class depends on SAR and ECw together. Not assessed above SAR 40 or without EC.'),
+        dict(var='SAR', name='Sodium toxicity, surface irrigation (SAR)', kind='graded', slight=3, severe=9,
+             source=FAO29),
+        dict(var='Na (meq/L)', name='Sodium toxicity, sprinkler (meq/L)', kind='graded', slight=3, severe=None,
+             source=FAO29, note='FAO gives no severe class for sprinklers.'),
+        dict(var='Cl (meq/L)', name='Chloride toxicity, surface irrigation (meq/L)', kind='graded', slight=4,
+             severe=10, source=FAO29),
+        dict(var='Cl (meq/L)', name='Chloride toxicity, sprinkler (meq/L)', kind='graded', slight=3,
+             severe=None, source=FAO29, note='FAO gives no severe class for sprinklers.'),
+        dict(var='B (mg/L)', name='Boron toxicity', kind='graded', slight=0.7, severe=3.0, source=FAO29),
+        dict(var='NO3-N (mg/L)', name='Nitrogen (NO3-N), sensitive crops', kind='graded', slight=5, severe=30,
+             source=FAO29),
+        dict(var='HCO3 (meq/L)', name='Bicarbonate, overhead sprinkling (meq/L)', kind='graded', slight=1.5,
+             severe=8.5, source=FAO29),
+        dict(var='pH', name='pH, normal range', kind='range', low=6.5, high=8.4, source=FAO29),
+    ],
 }
+
+# FAO infiltration: (SAR upper bound, ECw in uS/cm above which there is no restriction,
+# ECw below which it is severe). Between the two is slight to moderate
+FAO_INFILTRATION = [(3, 700, 200), (6, 1200, 300), (12, 1900, 500), (20, 2900, 1300), (40, 5000, 2900)]
+FAO_NOTE = ('FAO values assume semi-arid to arid conditions with good drainage, are not absolute limits, '
+            'and come mostly from the western USA.')
 
 # %% physical and chemical stressors by region (slightly disturbed ecosystems)
 # ANZECC & ARMCANZ (2000) Tables 3.3.2 to 3.3.9. Nutrients are ug/L in the
@@ -132,6 +198,106 @@ def set_names():
     return list(SETS) + [REGIONAL_NAME]
 
 
+def graded_text(g):
+    if g['kind'] == 'sar_ec':
+        return 'Table of SAR against ECw'
+    text = f"slight to moderate above {g['slight']:g}"
+    if g.get('severe') is not None:
+        text += f"; severe above {g['severe']:g}"
+    return text
+
+
+def classify(v, g):
+    # FAO restriction class per sample: 0 none, 1 slight to moderate, 2 severe, NaN not assessed
+    out = pd.Series(np.nan, index=v.index)
+    if g['kind'] == 'graded':
+        x = v[g['var']]
+        ok = x.notna()
+        out[ok] = 0
+        out[ok & (x > g['slight'])] = 1
+        if g.get('severe') is not None:
+            out[ok & (x > g['severe'])] = 2
+        return out
+    # infiltration, from SAR and EC together
+    if 'EC' not in v.columns:
+        return out
+    sar, ec = v['SAR'], v['EC']
+    lower = 0
+    for upper, none_above, severe_below in FAO_INFILTRATION:
+        rows = sar.notna() & ec.notna() & (sar >= lower) & (sar <= upper)
+        if lower > 0:
+            rows &= sar > lower
+        out[rows] = 1
+        out[rows & (ec > none_above)] = 0
+        out[rows & (ec < severe_below)] = 2
+        lower = upper
+    return out
+
+
+def chart_rows(region='Tropical Australia', ecosystem='Lowland river'):
+    # every single-variable guideline, for the bar chart: list of (label, set name, row)
+    # rows that depend on hardness are joined into one, drawn per sample
+    out = []
+    for set_name in set_names():
+        rows = regional_rows(region, ecosystem) if set_name == REGIONAL_NAME else SETS[set_name]
+        short = set_name + (f' [{region}, {ecosystem}]' if set_name == REGIONAL_NAME else '')
+        by_hardness = {}
+        for g in rows:
+            if 'hard' in g:
+                by_hardness.setdefault(g['var'], []).append(g)
+        done = set()
+        for g in rows:
+            if g['kind'] == 'sar_ec':
+                continue
+            if 'hard' in g:
+                if g['var'] in done:
+                    continue
+                done.add(g['var'])
+                parts = by_hardness[g['var']]
+                g = dict(var=g['var'], name=g['name'].split(',')[0] + ', by hardness', kind='hard_max',
+                         parts=parts, source=g['source'],
+                         note='The value depends on hardness, so it is drawn for each sample.')
+            out.append((f"{short}: {g['name']} ({graded_text(g) if g['kind'] == 'graded' else limit_text(g)})",
+                        set_name, g))
+    return out
+
+
+def limit_text(g):
+    if g['kind'] == 'hard_max':
+        return ' / '.join(f"{p['value']:g}" for p in g['parts']) + ' by hardness'
+    if g['kind'] == 'max':
+        return f"{g['value']:g}"
+    if g['kind'] == 'range':
+        return f"{g['low']:g} to {g['high']:g}"
+    return graded_text(g)
+
+
+def chart_lines(v, g):
+    # what to draw for one guideline row: list of (label, per-sample threshold Series)
+    # hardness-dependent rows give a threshold only for the samples they apply to
+    def per_sample(value):
+        s = pd.Series(float(value), index=v.index)
+        if 'hard' in g:
+            h = v['Hardness (mg/L as CaCO3)']
+            s[~(h.notna() & (h >= g['hard'][0]) & (h < g['hard'][1]))] = np.nan
+        return s
+    if g['kind'] == 'hard_max':
+        h = v['Hardness (mg/L as CaCO3)']
+        s = pd.Series(np.nan, index=v.index)
+        for p in g['parts']:
+            s[h.notna() & (h >= p['hard'][0]) & (h < p['hard'][1])] = float(p['value'])
+        return [(g['name'], s)]
+    if g['kind'] == 'max':
+        return [(f"{g['name']}: {g['value']:g}", per_sample(g['value']))]
+    if g['kind'] == 'range':
+        return [(f"Lower limit: {g['low']:g}", per_sample(g['low'])),
+                (f"Upper limit: {g['high']:g}", per_sample(g['high']))]
+    lines = [(f"Slight to moderate restriction: {g['slight']:g}", per_sample(g['slight']))]
+    if g.get('severe') is not None:
+        lines.append((f"Severe restriction: {g['severe']:g}", per_sample(g['severe'])))
+    return lines
+
+
 # %% comparison
 def assess(v, chosen, region='Tropical Australia', ecosystem='Lowland river'):
     # returns (summary, flags)
@@ -150,18 +316,28 @@ def assess(v, chosen, region='Tropical Australia', ecosystem='Lowland river'):
             applies = x.notna()
             if 'hard' in g:
                 applies &= hardness.notna() & (hardness >= g['hard'][0]) & (hardness < g['hard'][1])
-            if g['kind'] == 'max':
+            severe = pd.Series(False, index=v.index)
+            if g['kind'] in ('graded', 'sar_ec'):
+                cls = classify(v, g)
+                applies = cls.notna()
+                over = applies & (cls > 0)
+                severe = applies & (cls == 2)
+                limit = graded_text(g)
+            elif g['kind'] == 'max':
                 over = applies & (x > g['value'])
                 limit = f"{g['value']:g}"
             else:
                 over = applies & ((x < g['low']) | (x > g['high']))
                 limit = f"{g['low']:g} to {g['high']:g}"
+            which = [str(v.at[i, 'Sample']) + (' (severe)' if severe[i] else '') for i in v.index[over]]
+            note = g.get('note', '')
+            if g['source'] == FAO29:
+                note = (note + ' ' + FAO_NOTE).strip()
             summary.append({'Guideline set': label, 'Parameter': g['name'], 'Guideline value': limit,
                             'Samples assessed': int(applies.sum()), 'Outside guideline': int(over.sum()),
-                            'Which samples': ', '.join(v.loc[over, 'Sample'].astype(str)),
-                            'Note': g.get('note', ''), 'Source': g['source']})
+                            'Which samples': ', '.join(which), 'Note': note, 'Source': g['source']})
             for i in v.index[over]:
-                per_sample[i].append(g['name'])
+                per_sample[i].append(g['name'] + (' (severe)' if severe[i] else ''))
     flags = pd.DataFrame({'Sample': v['Sample'], 'Label': v['Label'],
                           'Outside guideline for': ['; '.join(dict.fromkeys(per_sample[i])) for i in v.index]})
     flags['Count'] = [len(dict.fromkeys(per_sample[i])) for i in v.index]

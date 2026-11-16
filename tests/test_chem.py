@@ -247,3 +247,69 @@ def test_one_entered_ion_takes_the_rest_of_the_alkalinity():
     t, _ = run(one_sample(pH=7, Temp=25, Ca=40.078, Mg=0, Na=0, K=0, HCO3=122.034, Cl=0, SO4=0))
     assert t.at[0, 'CO3 (meq/L)'] == pytest.approx(0.0, abs=1e-9)
     assert t.at[0, 'CBE (%)'] == pytest.approx(0.0, abs=0.01)
+
+
+def test_fao_classes_by_hand():
+    from core import guidelines
+    # SAR, EC (uS/cm) -> expected infiltration class (FAO 29 Table 1)
+    cases = [(2, 800, 0), (2, 500, 1), (2, 150, 2), (5, 1300, 0), (5, 250, 2), (15, 2000, 1),
+             (15, 1000, 2), (30, 6000, 0), (50, 1000, np.nan), (np.nan, 1000, np.nan)]
+    v = pd.DataFrame({'SAR': [c[0] for c in cases], 'EC': [c[1] for c in cases]})
+    row = [g for g in guidelines.SETS['Irrigation: degree of restriction on use (FAO)'] if g['kind'] == 'sar_ec'][0]
+    got = guidelines.classify(v, row)
+    for (sar, ec, want), g in zip(cases, got):
+        assert (np.isnan(want) and np.isnan(g)) or g == want, (sar, ec, g, want)
+    # graded single variable: chloride, surface irrigation, meq/L
+    cl = [g for g in guidelines.SETS['Irrigation: degree of restriction on use (FAO)']
+          if g['name'].startswith('Chloride toxicity, surface')][0]
+    got = guidelines.classify(pd.DataFrame({'Cl (meq/L)': [3.9, 4.1, 10.5]}), cl)
+    assert list(got) == [0, 1, 2]
+
+
+def test_who_and_fao_sets_in_assess():
+    from core import guidelines
+    raw = pd.concat([
+        one_sample(Sample='fresh', pH=7.2, Temp=25, Ca=20, Mg=5, Na=30, K=2, Cl=40, SO4=20, Total_Alk_CaCO3=60,
+                   EC=300, B=0.1),
+        one_sample(Sample='salty', pH=7.5, Temp=25, Ca=60, Mg=40, Na=900, K=10, Cl=1400, SO4=300,
+                   Total_Alk_CaCO3=200, EC=5000, B=3.5, Ba=1.5),
+    ], ignore_index=True)
+    t, _ = run(raw)
+    sets = ['Drinking water: health (WHO)', 'Drinking water: acceptability (WHO)',
+            'Irrigation: degree of restriction on use (FAO)']
+    summary, flags = guidelines.assess(t, sets)
+    by = lambda name: summary.set_index('Parameter').loc[name]
+    assert by('Barium')['Which samples'] == 'salty'          # WHO 1.3, ADWG would be 2
+    assert by('Boron')['Which samples'] == 'salty'
+    assert by('Boron toxicity')['Which samples'] == 'salty (severe)'
+    assert by('Salinity, ECw (uS/cm)')['Which samples'] == 'salty (severe)'
+    assert by('Chloride')['Which samples'] == 'salty'
+    assert 'semi-arid' in by('Boron toxicity')['Note']
+    assert 'Boron toxicity (severe)' in flags.set_index('Sample').at['salty', 'Outside guideline for']
+
+
+def test_chart_lines_and_bars():
+    from core import guidelines, plots
+    v = pd.DataFrame({'Sample': ['a', 'b', 'c'], 'Label': ['x', 'x', 'y'], 'Color': '', 'Marker': '',
+                      'NO3-N (mg/L)': [0.5, 2.0, 5.0], 'Hardness (mg/L as CaCO3)': [10, 100, 300],
+                      'pH': [6.0, 7.0, 9.0], 'EC': [500, 1000, 4000]})
+    soft = [g for g in guidelines.SETS['Aquatic ecosystems: freshwater, toxicants at 95% protection (ANZG)']
+            if 'soft' in g['name']][0]
+    (_, thr), = guidelines.chart_lines(v, soft)
+    assert thr.notna().tolist() == [True, False, False]      # only the soft-water sample
+    # in the chart list the three hardness rows are one, with a value for every sample
+    combined = [g for lab, _, g in guidelines.chart_rows() if g['kind'] == 'hard_max'][0]
+    (_, thr), = guidelines.chart_lines(v, combined)
+    assert thr.tolist() == [1.1, 2.6, 29]
+    assert not any('soft water' in lab for lab, _, _ in guidelines.chart_rows())
+    ph = guidelines.chart_lines(v, dict(var='pH', name='pH', kind='range', low=6.5, high=8.5, source=''))
+    assert [l for l, _ in ph] == ['Lower limit: 6.5', 'Upper limit: 8.5']
+    ec = [g for g in guidelines.SETS['Irrigation: degree of restriction on use (FAO)'] if g['var'] == 'EC'][0]
+    assert len(guidelines.chart_lines(v, ec)) == 2
+    for var, row in [('NO3-N (mg/L)', soft), ('pH', dict(var='pH', name='pH', kind='range', low=6.5, high=8.5,
+                                                        source='')), ('EC', ec)]:
+        fig = plots.guideline_bars(v, var, guidelines.chart_lines(v, row), highlight='#ff0000', sort=True)
+        assert fig is not None
+    assert plots.guideline_bars(v, 'EC', guidelines.chart_lines(v, ec), bar_colour='#123456', log=True)
+    labels = [lab for lab, _, _ in guidelines.chart_rows()]
+    assert all('Infiltration' not in l for l in labels)       # the SAR with EC table is not a bar chart

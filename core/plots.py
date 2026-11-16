@@ -38,6 +38,7 @@ import matplotlib
 import matplotlib.colors as mcolors
 from matplotlib import font_manager
 import matplotlib.text
+import matplotlib.patches
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
@@ -74,8 +75,9 @@ STYLE = {
     'mathtext.default': 'regular',
 }
 
-# colours and markers for the groups
-PALETTE = ['#FCB711', '#F37021', '#CC004C', '#6460AA', '#0089D0', '#0DB14B', '#808080',
+# colours and markers for the groups: the six NBC colours from green back to gold,
+# then grey and three extras
+PALETTE = ['#0DB14B', '#0089D0', '#6460AA', '#CC004C', '#F37021', '#FCB711', '#808080',
            '#00bdd0', '#a88958', '#0055d0']
 MARKERS = ['o', 's', '^', 'D', 'v', 'P', 'X', '<', '>', 'h']
 # names for the app. Filled shapes only, so hollow markers still work
@@ -865,6 +867,83 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
         else:
             handles = _legend_handles(styles, bool(hol.any()))
         fig.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(0.69, 0.96))
+    return fig
+
+
+# %% bar chart against a guideline
+def guideline_bars(v, var, lines, bar_colour=None, highlight=None, line_colour='#222222',
+                   log=False, sort=False, title=None):
+    # one bar per sample, with the guideline as dashed line(s)
+    # lines: list of (label, per-sample threshold Series) from guidelines.chart_lines
+    # bar_colour None = group colours; highlight = hatch colour for bars outside the guideline
+    # (hatched, so the group colour still shows)
+    styles_all = group_styles(v)   # before sorting, so each group keeps its colour
+    d = v[v[var].notna()]
+    if sort:
+        d = d.sort_values(var, kind='stable')
+    if d.empty:
+        return None
+    x = np.arange(len(d))
+    styles = {l: styles_all[l] for l in styles_all if l in set(d['Label'])}
+    if bar_colour:
+        colours = [bar_colour] * len(d)
+    else:
+        colours = [styles[l][0] for l in d['Label']]
+    outside = pd.Series(False, index=d.index)
+    if highlight and lines:
+        if len(lines) == 2 and lines[0][0].startswith('Lower limit'):
+            lo, hi = lines[0][1].reindex(d.index), lines[1][1].reindex(d.index)
+            outside = (lo.notna() & (d[var] < lo)) | (hi.notna() & (d[var] > hi))
+        else:
+            first = lines[0][1].reindex(d.index)
+            outside = first.notna() & (d[var] > first)
+    width = max(12, min(30, 0.45 * len(d) + 6))
+    with matplotlib.rc_context(STYLE):
+        fig = Figure(figsize=(width * CM, 9 * CM), dpi=150)
+        ax = fig.add_axes([0.1, 0.3, 0.62 if width < 20 else 0.72, 0.62])
+        ax.bar(x, d[var], color=colours, edgecolor='black', linewidth=0.4, width=0.75, zorder=2)
+        if outside.any():
+            ox = x[outside.to_numpy()]
+            ax.bar(ox, d.loc[outside, var], color='none', edgecolor=highlight, hatch='////', linewidth=0,
+                   width=0.75, zorder=2.5)
+            ax.bar(ox, d.loc[outside, var], color='none', edgecolor='black', linewidth=0.4, width=0.75,
+                   zorder=2.6)
+        dashes = ['--', (0, (6, 2, 1, 2))]
+        handles = []
+        for k, (label, thr) in enumerate(lines):
+            t = thr.reindex(d.index)
+            ls = dashes[k % 2] if not label.startswith(('Lower', 'Upper')) else '--'
+            if t.notna().all() and t.nunique() == 1:
+                ax.axhline(t.iloc[0], color=line_colour, ls=ls, lw=1.2, zorder=3)
+            else:
+                for xi, ti in zip(x, t):
+                    if pd.notna(ti):
+                        ax.plot([xi - 0.45, xi + 0.45], [ti, ti], color=line_colour, ls=ls, lw=1.2, zorder=3)
+            if not (label.startswith('Upper') and k == 1):
+                text = 'Guideline range' if label.startswith('Lower') else label
+                handles.append(Line2D([], [], color=line_colour, ls=ls, lw=1.2, label=text))
+        ax.set_xticks(x)
+        ax.set_xticklabels(d['Sample'].astype(str), rotation=90, fontsize=7)
+        ax.set_xlim(-0.6, len(d) - 0.4)
+        ax.set_ylabel(pretty(var))
+        if log:
+            ax.set_yscale('log')
+        else:
+            ax.set_ylim(bottom=min(0, float(d[var].min()) * 1.05))
+            tops = [float(t.max()) for _, t in lines if t.notna().any()]
+            top = max([float(d[var].max())] + tops)
+            ax.set_ylim(top=top * 1.08 if top > 0 else None)
+        if title:
+            ax.set_title(title, fontsize=8, loc='left')
+        if not bar_colour:
+            handles = [matplotlib.patches.Patch(facecolor=styles[l][0], edgecolor='black', lw=0.4, label=l)
+                       for l in styles] + handles
+        if highlight and outside.any():
+            handles.append(matplotlib.patches.Patch(facecolor='white', edgecolor=highlight, hatch='////',
+                                                    lw=0.4, label='Outside the guideline'))
+        if handles:
+            ax.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(1.01, 1.0),
+                      fontsize=7)
     return fig
 
 

@@ -23,7 +23,7 @@ import pandas as pd
 
 # %% analytes
 # name: (g/mol, charge, PHREEQC name)
-# SiO2 has no charge, so it is read as mmol/L if the input unit is meq/L
+# SiO2 and B have no charge, so they are read as mmol/L if the input unit is meq/L
 ANALYTES = {
     'Ca':   (40.078,  +2, 'Ca'),
     'Mg':   (24.305,  +2, 'Mg'),
@@ -43,6 +43,7 @@ ANALYTES = {
     'Ba':   (137.327, +2, 'Ba'),
     'Fe':   (55.845,  +2, 'Fe(2)'),
     'Mn':   (54.938,  +2, 'Mn(2)'),
+    'B':    (10.81,    0, 'B'),       # optional; boric acid, left out of the charge balance
 }
 
 MAJORS = ['Ca', 'Mg', 'Na', 'K', 'HCO3', 'CO3', 'Cl', 'SO4']
@@ -109,7 +110,7 @@ def template_bytes():
         'Ca, Mg, Na, K, Cl, SO4 ...',
         'ALKALINITY', 'Total_Alk_CaCO3', 'Bicarb_Alk_CaCO3', 'Carb_Alk_CaCO3', 'DIC', '',
         'HCO3', 'CO3',
-        'NO3, NH4', 'PO4', 'SiO2', 'Color', 'Marker',
+        'NO3, NH4', 'PO4', 'SiO2', 'B', 'Color', 'Marker',
         '(any other column)', '', 'Units', 'Blank cells', 'Below detection'],
         'What goes in it': [
             'Unique sample name. Required.',
@@ -130,6 +131,7 @@ def template_bytes():
             'Nitrate and ammonium (total ammonia), as the ion or as N (tell the app which). Lab reports usually give NO3-N and NH3-N, i.e. as N.',
             'Phosphate (filterable reactive phosphorus), as PO4 or as P (tell the app which).',
             'Silica as SiO2. Neutral, so if the unit is meq/L enter it in mmol/L.',
+            'Boron, as B. Optional; used for the drinking water and irrigation guidelines. Neutral, so if the unit is meq/L enter it in mmol/L.',
             'Optional matplotlib colour for this row (e.g. #0089d0). Blank = automatic by Label.',
             'Optional matplotlib marker for this row (e.g. o, s, ^, D). Blank = automatic by Label.',
             'Any extra numeric column (depth, d18O, 87Sr/86Sr ...) is carried through and can be plotted.',
@@ -199,6 +201,8 @@ def example_data():
     # nutrients (as the ion), with one high nitrate
     df['NH4'] = rng.uniform(0.01, 0.12, len(df)).round(3)
     df['PO4'] = rng.uniform(0.005, 0.06, len(df)).round(3)
+    df['B'] = np.where(df['Label'].str.startswith('Saline'), rng.uniform(1.0, 4.0, len(df)),
+                       rng.uniform(0.02, 0.4, len(df))).round(3)
     df.loc[12, 'NO3'] = 62.0
     # HCO3 and CO3 as a lab would report them (alkalinity x 1.219, CO3 below detection),
     # for two samples only. The rest are left to PHREEQC

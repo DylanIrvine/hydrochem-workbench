@@ -53,14 +53,14 @@ def test_redis_backend_is_used_when_configured(tmp_path, monkeypatch):
     assert not p.exists()          # file backend untouched when Redis succeeds
 
 
-def test_redis_failure_falls_back_to_file(tmp_path, monkeypatch):
+def test_redis_failure_does_not_fall_back_to_file(tmp_path, monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("no network")
 
     monkeypatch.setattr("core.usage._redis_incr", boom)
     p = tmp_path / "count.json"
-    assert increment(p, redis_url="https://x", redis_token="t") == 1
-    assert p.exists()
+    assert increment(p, redis_url="https://x", redis_token="t") is None
+    assert not p.exists()
 
 
 def test_no_redis_creds_uses_file(tmp_path):
@@ -86,3 +86,20 @@ def test_status_reports_backend(tmp_path, monkeypatch):
     monkeypatch.setattr("core.usage._redis_get", boom)
     s = status(p, redis_url="https://x", redis_token="t")
     assert s["backend"] == "redis-error" and "bad token" in s["detail"]
+
+
+def test_app_reads_either_secrets_layout(monkeypatch):
+    # [upstash] url/token (HydroSILO style) and [redis] rest_url/rest_token (HydroSTITCH style)
+    import importlib
+    import streamlit as st
+    for layout in ({'upstash': {'url': 'https://a.upstash.io', 'token': 'tok'}},
+                   {'redis': {'rest_url': 'https://a.upstash.io', 'rest_token': 'tok'}}):
+        monkeypatch.setattr(st, 'secrets', layout, raising=False)
+        src = open(__file__.replace('tests/test_usage.py', 'app.py')).read()
+        start = src.index('def _counter_secret')
+        end = src.index('@st.cache_data(ttl=90')
+        ns = {'st': st, 'os': importlib.import_module('os')}
+        exec(src[start:end], ns)
+        args = ns['_counter_args']()
+        assert args['redis_url'] == 'https://a.upstash.io' and args['redis_token'] == 'tok'
+        assert args['redis_key'] == 'hydrochem:runs'

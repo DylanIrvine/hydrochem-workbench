@@ -10,7 +10,9 @@
 
 # core/usage.py
 # usage counter. Uses Upstash Redis if a url and token are given, otherwise a
-# local json file (.run_count.json), which resets when Streamlit Cloud redeploys
+# local json file (.run_count.json), which resets when Streamlit Cloud restarts.
+# If Redis is configured but a call fails, nothing is counted (no fall back to the
+# file, whose small count would be shown as if it were the total)
 # default redis key is "hydrochem:runs"
 
 from __future__ import annotations
@@ -78,11 +80,13 @@ def increment(path=None, start=0, *, redis_url=None, redis_token=None,
               redis_key=DEFAULT_REDIS_KEY):
     # add 1 and return the new total (None if nothing is available)
     if redis_url and redis_token:
-        try:
-            return _redis_incr(redis_url, redis_token, redis_key or DEFAULT_REDIS_KEY,
-                               start)
-        except Exception:
-            pass   # fall back to the file
+        for _ in range(2):   # one retry
+            try:
+                return _redis_incr(redis_url, redis_token, redis_key or DEFAULT_REDIS_KEY,
+                                   start)
+            except Exception:
+                pass
+        return None
 
     target = _resolve_path(path)
     try:

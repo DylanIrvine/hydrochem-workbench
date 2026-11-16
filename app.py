@@ -32,7 +32,7 @@ from core import chem, guidelines, plots, usage
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.9.0'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.10.0'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -96,7 +96,7 @@ st.write(
     'your data in (one row per sample, one unit for every ion, alkalinity as CaCO3 straight from '
     'the lab report), choose the unit and upload it.\n\n'
     'What comes back: charge balance, water type, saturation indices and pCO2, a comparison with '
-    'Australian water quality guidelines, a Piper diagram, the '
+    'Australian, WHO and FAO (irrigation) water quality guidelines with a bar chart against any of them, a Piper diagram, the '
     'classical diagrams, a gallery of diagnostic ion, ratio and saturation-index plots with '
     'reference lines, and a builder for any plot the gallery does not have. The database is '
     'phreeqc.dat, so results are for fresh water; saline samples are flagged.')
@@ -104,23 +104,31 @@ st.write(
 
 # %% usage counter
 # counts sessions that process a dataset. Uses Upstash Redis if the secrets
-# are set (as for HydroSTITCH), otherwise a local file. See core/usage.py
-def _counter_secret(name, env):
+# are set, otherwise a local file that resets when the app restarts. See core/usage.py
+# Takes either layout used across the apps:
+#   [redis] rest_url / rest_token   (HydroSTITCH)
+#   [upstash] url / token           (HydroSILO, HydroPOINT, HydroCAPTURE)
+# or top-level UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN, or the same
+# names as environment variables
+def _counter_secret(names, env):
     try:
         sec = st.secrets
-        if 'redis' in sec and name in sec['redis']:
-            return str(sec['redis'][name])
-        if env in sec:
-            return str(sec[env])
+        for section in ('redis', 'upstash'):
+            if section in sec:
+                for name in names:
+                    if name in sec[section] and str(sec[section][name]).strip():
+                        return str(sec[section][name]).strip()
+        if env in sec and str(sec[env]).strip():
+            return str(sec[env]).strip()
     except Exception:
         pass
-    return os.environ.get(env)
+    return os.environ.get(env) or None
 
 
 def _counter_args():
-    return dict(redis_url=_counter_secret('rest_url', 'UPSTASH_REDIS_REST_URL'),
-                redis_token=_counter_secret('rest_token', 'UPSTASH_REDIS_REST_TOKEN'),
-                redis_key=_counter_secret('key', 'HYDROCHEM_RUN_COUNT_KEY') or 'hydrochem:runs')
+    return dict(redis_url=_counter_secret(('rest_url', 'url'), 'UPSTASH_REDIS_REST_URL'),
+                redis_token=_counter_secret(('rest_token', 'token'), 'UPSTASH_REDIS_REST_TOKEN'),
+                redis_key=_counter_secret(('key',), 'HYDROCHEM_RUN_COUNT_KEY') or 'hydrochem:runs')
 
 
 @st.cache_data(ttl=90, show_spinner=False)
@@ -146,12 +154,16 @@ _use_count_slot = st.empty()
 
 def show_use_count():
     status = _counter_status()
-    total = st.session_state.get('use_count') or status.get('count')
+    # whichever is larger: this session's increment, or the latest read
+    total = max(st.session_state.get('use_count') or 0, status.get('count') or 0)
     with _use_count_slot.container():
         if total:
             st.caption(f'{APP_NAME} sessions that have processed data: {total:,}')
         if status['backend'] == 'redis-error':
             st.caption(f":orange[Usage counter: Redis is configured but not reachable ({status['detail']}).]")
+        elif status['backend'] in ('file', 'memory'):
+            st.caption(':gray[Usage counter is not connected to its database, so this count restarts '
+                       'whenever the app restarts.]')
 
 
 show_use_count()
@@ -221,6 +233,12 @@ with st.expander('**How to cite and references**'):
         'Richards, L.A. (ed.) (1954). Diagnosis and improvement of saline and alkali soils. USDA '
         'Agriculture Handbook 60. (Sodium adsorption ratio.)\n\n'
         '**Water quality guidelines**\n\n'
+        'World Health Organization (2026). Guidelines for drinking-water quality: fourth edition '
+        'incorporating the first, second and third addenda. WHO, Geneva. '
+        'https://www.who.int/publications/i/item/9789240121225\n\n'
+        'Ayers, R.S. and Westcot, D.W. (1985). Water quality for agriculture. FAO Irrigation and '
+        'Drainage Paper 29 Rev. 1. Food and Agriculture Organization of the United Nations, Rome. '
+        'https://www.fao.org/3/t0234e/t0234e00.htm\n\n'
         'ANZG (2018). Australian and New Zealand Guidelines for Fresh and Marine Water Quality. '
         'Australian and New Zealand Governments and Australian state and territory governments, '
         'Canberra. https://www.waterquality.gov.au/anz-guidelines\n\n'
@@ -515,9 +533,11 @@ guide_sets = st.session_state[opt('guide_sets', GUIDE_DEFAULT, guidelines.set_na
 guide_region = st.session_state[opt('guide_region', 'Tropical Australia', list(guidelines.REGIONS))]
 guide_eco = st.session_state[_eco_key(guide_region)[0]]
 if view == 'Guidelines':
-    st.subheader('Comparison with Australian water quality guidelines')
-    st.write('Drinking water guidelines and environmental (aquatic ecosystem) guidelines for fresh, '
-             'estuarine and marine waters. Choose the sets that suit the water body.')
+    st.subheader('Comparison with water quality guidelines')
+    st.write('Australian drinking water (ADWG) and aquatic ecosystem (ANZG) guidelines for fresh, '
+             'estuarine and marine waters, plus two international sets: the WHO Guidelines for '
+             'drinking-water quality, and the FAO guidelines for irrigation water (Ayers and Westcot 1985). '
+             'Choose the sets that suit the water body and its use.')
     guide_sets = st.multiselect('Guideline sets', guidelines.set_names(), key='guide_sets')
     if guidelines.REGIONAL_NAME in guide_sets:
         c1, c2 = st.columns(2)
@@ -548,7 +568,56 @@ if view == 'Guidelines':
         'data, with state or site-specific values taking precedence where they exist. '
         'Where the source gives a range, the upper end is used. '
         'Total N and total P are not in the template, so those guideline values are not checked. '
+        'WHO values are an international reference from which countries set their own standards; they are '
+        'not standards themselves. The FAO irrigation guidelines rate the degree of restriction on use as '
+        'none, slight to moderate, or severe; a sample is counted as outside the guideline from slight to '
+        'moderate upward, and severe cases are marked. FAO values assume semi-arid to arid conditions with '
+        'good drainage and are not absolute limits. '
         'Guideline values are revised from time to time: check the current source before relying on them.')
+
+    # bar chart of one parameter against one guideline
+    st.subheader('Bar chart against a guideline')
+    if vp.empty:
+        st.info('No groups are ticked to plot. Tick at least one in the Groups panel above.')
+    else:
+        all_rows = guidelines.chart_rows(guide_region, guide_eco)
+        chart_vars = list(dict.fromkeys(g['var'] for _, _, g in all_rows
+                                        if g['var'] in vp.columns and vp[g['var']].notna().any()))
+        if not chart_vars:
+            st.info('None of the parameters with guideline values are in the data.')
+        else:
+            c1, c2 = st.columns([1, 2])
+            g_var = c1.selectbox('Parameter', chart_vars, format_func=lambda c: c,
+                                 key=opt('opt_gchart_var', chart_vars[0], chart_vars))
+            rows_here = [(lab, g) for lab, _, g in all_rows if g['var'] == g_var]
+            rule_labels = [lab for lab, _ in rows_here]
+            g_rule = c2.selectbox('Guideline', rule_labels, key=opt('opt_gchart_rule', rule_labels[0], rule_labels),
+                                  help='Every guideline for this parameter, from all the sets.')
+            g_row = dict(rows_here)[g_rule]
+            c1, c2, c3, c4 = st.columns(4)
+            BAR_MODES = ['Group colours', 'One colour']
+            bar_mode = c1.radio('Bars', BAR_MODES, key=opt('opt_gchart_barmode', BAR_MODES[0], BAR_MODES))
+            bar_col = c2.color_picker('Bar colour', key=opt('opt_gchart_barcol', '#0089D0'),
+                                      disabled=bar_mode != 'One colour')
+            line_col = c3.color_picker('Guideline line colour', key=opt('opt_gchart_linecol', '#222222'))
+            hl_col = c4.color_picker('Hatching colour', key=opt('opt_gchart_hlcol', '#000000'),
+                                     help='Bars outside the guideline are hatched in this colour.')
+            c1, c2, c3 = st.columns(3)
+            hl = c1.checkbox('Hatch bars outside the guideline', key=opt('opt_gchart_hl', False))
+            g_log = c2.checkbox('Log y axis', key=opt('opt_gchart_log', False))
+            g_sort = c3.checkbox('Sort by value', key=opt('opt_gchart_sort', False))
+            fig = plots.guideline_bars(vp, g_var, guidelines.chart_lines(vp, g_row),
+                                       bar_colour=bar_col if bar_mode == 'One colour' else None,
+                                       highlight=hl_col if hl else None, line_colour=line_col,
+                                       log=g_log, sort=g_sort)
+            if fig is None:
+                st.info('No plotted sample has a value for this parameter.')
+            else:
+                safe = g_var.split(' (')[0].replace('/', '-').replace(' ', '_')
+                show(fig, f'guideline_bars_{safe}', 'dl_gchart')
+                st.caption(f"Source: {g_row['source']}. " + (g_row.get('note') or '') +
+
+                           (' Samples with a value below zero or none are left out.' if g_log else ''))
 
 # %% plots need at least one group
 PLOT_VIEWS = ('Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot')
@@ -676,6 +745,7 @@ if view == 'Export':
                                  f"colour by {ss.get('custom_color', 'Group (Label)')}"),
         ('Plots', 'Figure zip resolution (dpi)', ss.get('opt_dpi', 300)),
         ('Guidelines', 'Sets', guide_txt),
+        ('Guidelines', 'Bar chart', f"{ss.get('opt_gchart_var', '')}: {ss.get('opt_gchart_rule', '')}"),
     ]
     settings = pd.DataFrame(rows, columns=['Section', 'Setting', 'Value'])
     buf = io.BytesIO()
