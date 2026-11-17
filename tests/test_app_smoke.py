@@ -173,7 +173,18 @@ def test_app_with_uncertainty(tmp_path, monkeypatch):
     at.checkbox(key='opt_unc').check().run()
     at.number_input(key='opt_unc_n').set_value(20).run()
     assert not at.exception
-    assert any(e.label.startswith('**Uncertainty inputs**') for e in at.expander)
+    # the table and the explanations only when asked for
+    assert not any(e.label.startswith('**How the default') for e in at.expander)
+    at.checkbox(key='opt_unc_show').check().run()
+    assert not at.exception
+    labels = [e.label for e in at.expander]
+    assert '**How the default values were determined**' in labels
+    assert '**How to estimate your own values**' in labels
+    assert any(s.value == 'Uncertainty inputs' for s in at.subheader)
+    at.button(key='unc_reset').click().run()
+    assert not at.exception
+    at.checkbox(key='opt_unc_show').uncheck().run()
+    assert not at.exception
     for view in ['Data and checks', 'Guidelines', 'Piper', 'Classical diagrams', 'Diagnostic gallery',
                  'Custom plot', 'Export']:
         at.radio(key='opt_view').set_value(view).run()

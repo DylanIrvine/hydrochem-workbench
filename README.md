@@ -52,7 +52,8 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
 5. **Plots.**
    - Piper, in the coloured-field style from `PiperScript.py`
    - Schoeller and Stiff, native, same style
-   - Durov, Gibbs, Chadha and HFE-D passed through from WQChartPy as is
+   - Durov, Gibbs, Chadha and HFE-D drawn by WQChartPy, with plain-text labels
+     and the uncertainty added
    - Diagnostic gallery (about 120 panels in 15 sets), with reference lines,
      shaded near-equilibrium bands and interpretation notes: ions and ion/Cl
      ratios against Cl, source-of-solute ratios (Na/Cl against TDS, HCO3

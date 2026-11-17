@@ -78,6 +78,61 @@ _DEFAULTS = [
 COLUMNS = {name: cols for name, cols, *_ in _DEFAULTS}
 
 
+DEFAULTS_TEXT = """
+**Laboratory analytes (Ca, Mg, Na, K, Cl, SO4, alkalinity, NO3, Br, F).** The relative SD is the
+root mean square deviation of laboratory control sample (LCS) recoveries from 100 %, from 19
+quality-control reports from an Australian laboratory (surface water and groundwater, 2021 to 2026),
+9 to 15 analytical batches per analyte. An LCS is a known standard run in every batch, so the spread
+of its recoveries from batch to batch includes both between-batch precision and any bias, which is
+how laboratories themselves estimate measurement uncertainty. Laboratory duplicates in the same
+reports gave smaller values (alkalinity 1.6 % against 4.4 %, for example) because they only see the
+scatter within one batch, so they were not used. With 9 to 15 batches, each value is itself uncertain:
+the 95 % confidence interval runs from about 0.7 to 1.6 times the value.
+
+**LOR.** Typical reporting limits of a commercial laboratory. Results are reported to the LOR's
+resolution, so a rounding term of LOR / sqrt(12) is included. It matters only close to the LOR.
+
+**Field values (pH, temperature, EC).** The accuracy in the YSI ProDSS specification: +/-0.2 pH
+units (within 10 deg C of the calibration temperature), +/-0.2 deg C, and +/-0.5 % of the reading
+for EC. A specification is a bound, so it is treated as a rectangular distribution and the SD is the
+bound divided by sqrt(3) (JCGM 100:2008). These are best-case values: probes drift between
+calibrations, and pH in dilute, low ionic strength water is often worse.
+
+**Everything else (NH4, PO4, SiO2, Sr, Ba, Fe, Mn, B, DIC, measured TDS).** 5 % placeholders, not
+derived from data. Replace them if those analytes matter to your interpretation.
+"""
+
+OWN_VALUES_TEXT = """
+**1. Ask your laboratory.** Accredited laboratories (ISO/IEC 17025, NATA in Australia) must estimate
+the measurement uncertainty (MU) of each method and will provide it. It is usually an expanded
+uncertainty at about 95 % (coverage factor k = 2), as a percentage. **Divide it by 2** to get the
+relative SD for this table. If the laboratory gives MU as the LOR for results near the LOR, that is
+what the LOR term here does already.
+
+**2. From your own quality-control reports.** Collect the laboratory control sample (LCS) recoveries
+for an analyte from as many batches as you can (10 or more). The relative SD (%) is
+100 x sqrt(mean((recovery / 100 - 1)^2)), so a set of recoveries of 95, 104, 99 and 102 % gives
+about 3.4 %. Use one value per batch. Matrix spike recoveries can show matrix effects but are noisier.
+
+**3. From laboratory duplicates (a lower bound).** For n duplicate pairs with relative percent
+differences RPD (as fractions), the relative SD is sqrt(sum(RPD^2) / (2n)). Duplicates run in the
+same batch, so this misses between-batch variation and is usually too small. Some laboratories
+report an RPD of 0 whenever the two results differ by less than the LOR, which makes it smaller still.
+
+**4. Field probes.** Take the accuracy (+/- a) from the instrument specification and use a / sqrt(3)
+as the absolute SD. If you have repeat readings at a site, or checks against a buffer or standard
+after use, the SD of those differences is better. Increase the pH value for dilute waters or long
+gaps between calibrations.
+
+**5. LOR.** Copy the LOR from the lab report (mg/L as reported: NO3 and NH4 as N, PO4 as P,
+alkalinity as CaCO3).
+
+Use **Relative SD** for anything whose uncertainty grows with the value (concentrations, EC) and
+**Absolute SD** for anything with a fixed uncertainty in its own units (pH, temperature). Both can be
+used together. A value of 0 switches that part off.
+"""
+
+
 def default_table():
     return pd.DataFrame([(name, lor, rel, ab, src) for name, _, lor, rel, ab, src in _DEFAULTS],
                         columns=TABLE_COLS)

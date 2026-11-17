@@ -32,7 +32,7 @@ from core import chem, guidelines, plots, uncertainty, usage
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.11.0'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.11.1'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -215,8 +215,8 @@ with st.expander('**How to cite and references**'):
         'Yang, J., Liu, H., Tang, Z., Peeters, L. and Ye, M. (2022). Visualization of aqueous '
         'geochemical data using Python and WQChartPy. Groundwater, 60(4), 555-564. '
         'https://doi.org/10.1111/gwat.13185\n\n'
-        'The Piper diagram here is adapted from WQChartPy; the Durov, Gibbs, Chadha and HFE-D '
-        'diagrams are drawn by WQChartPy directly.\n\n'
+        'The Piper diagram here is adapted from WQChartPy. The Durov, Gibbs, Chadha and HFE-D '
+        'diagrams are drawn by WQChartPy, with plain-text labels and the uncertainty added by this app.\n\n'
         '**Original diagram references**\n\n'
         'Piper, A.M. (1944). A graphic procedure in the geochemical interpretation of '
         'water-analyses. Eos, Transactions American Geophysical Union, 25(6), 914-928. '
@@ -307,7 +307,8 @@ def process(raw, unit, n_as_n, p_as_p, dic_unit, rules, lor):
 
 def monte_carlo(base, table, n):
     # the uncertainty analysis, kept for the session until an input or setting changes
-    key = hashlib.sha1((base['key'] + table.to_csv() + str(n)).encode()).hexdigest()
+    # the app version is in the key, so a result kept from an older version is not reused
+    key = hashlib.sha1((APP_VERSION + base['key'] + table.to_csv() + str(n)).encode()).hexdigest()
     cached = st.session_state.get('mc')
     if cached is not None and cached[0] == key:
         return cached[1]
@@ -430,9 +431,15 @@ with st.sidebar:
                             key=opt('opt_unc_n', U.DEFAULT_N), disabled=not use_unc,
                             help='More realisations give smoother intervals and take longer. '
                                  f'{U.DEFAULT_N} is enough for the 5th and 95th percentiles.')
+    show_unc = st.checkbox('Show and edit the uncertainty values', key=opt('opt_unc_show', False),
+                           disabled=not use_unc,
+                           help='Shows the table of uncertainties used for each input, how the defaults were '
+                                'determined, and how to estimate your own.')
     if use_unc:
-        st.caption('The uncertainty of each input is set in the "Uncertainty inputs" panel above the views. '
-                   f'Intervals are {U.INTERVAL} (5th to 95th percentile).')
+        st.caption(f'Intervals are {U.INTERVAL} (5th to 95th percentile). '
+                   + ('Edited values are in use.' if (U.mark_edited(U.check_table(
+                       st.session_state.get('unc_current', st.session_state.get('unc_base', U.default_table()))))
+                       ['Source'] == 'Entered by user').any() else 'Default values are in use.'))
 
 HOW = {'Mean of the dataset': 'mean', 'Fixed value': 'value', 'From charge balance': 'balance'}
 rules = (('pH', (HOW[ph_how], ph_val)), ('Temp', (HOW[t_how], t_val)), ('HCO3', (HOW[h_how], h_val)))
@@ -523,31 +530,34 @@ with st.expander(f'**Groups (Label): colours, markers and which to plot** ({len(
 ss = st.session_state
 ss.setdefault('unc_base', U.default_table())
 mc = None
-unc_table = U.check_table(ss.get('unc_current', ss['unc_base']))
-if not use_unc:
-    # keep any edits for when the analysis is switched back on
+unc_table = U.mark_edited(U.check_table(ss.get('unc_current', ss['unc_base'])))
+show_inputs = use_unc and show_unc
+if not show_inputs:
+    # the table is not drawn: keep any edits for when it is shown again
     ss['unc_base'] = unc_table
     ss.pop('unc_editor', None)
 else:
-    with st.expander(f'**Uncertainty inputs** ({U.INTERVAL} intervals, {unc_n} realisations)'):
-        st.caption(U.LOR_NOTE + ' Defaults: major ions, alkalinity, NO3, Br and F from the laboratory '
-                   'control sample recoveries in 19 quality-control reports from an Australian laboratory '
-                   '(surface water and groundwater, 2021 to 2026); pH, temperature and EC from the YSI '
-                   'ProDSS specifications; the rest are placeholders. Replace any of them with values for '
-                   'your laboratory and instruments.')
-        if st.button('Reset to defaults', key='unc_reset'):
-            ss['unc_base'] = U.default_table()
-            ss.pop('unc_editor', None)
-            ss.pop('unc_current', None)
-        edited = st.data_editor(
-            ss['unc_base'], key='unc_editor', hide_index=True, num_rows='fixed', width='stretch',
-            disabled=['Variable', 'Source'],
-            column_config={'LOR': st.column_config.NumberColumn(min_value=0.0, format='%g'),
-                           'Relative SD (%)': st.column_config.NumberColumn(min_value=0.0, format='%g'),
-                           'Absolute SD': st.column_config.NumberColumn(min_value=0.0, format='%g')})
-        ss['unc_current'] = edited
-        unc_table = U.mark_edited(U.check_table(edited))
-        st.caption(U.method_text(unc_n, U.SEED))
+    st.subheader('Uncertainty inputs')
+    st.write('These are the uncertainties drawn for every measured value. Edit any cell to use values for '
+             'your laboratory and instruments; the analysis reruns with them. ' + U.LOR_NOTE)
+    if st.button('Reset to defaults', key='unc_reset'):
+        ss['unc_base'] = U.default_table()
+        ss.pop('unc_editor', None)
+        ss.pop('unc_current', None)
+    edited = st.data_editor(
+        ss['unc_base'], key='unc_editor', hide_index=True, num_rows='fixed', width='stretch',
+        disabled=['Variable', 'Source'],
+        column_config={'LOR': st.column_config.NumberColumn(min_value=0.0, format='%g'),
+                       'Relative SD (%)': st.column_config.NumberColumn(min_value=0.0, format='%g'),
+                       'Absolute SD': st.column_config.NumberColumn(min_value=0.0, format='%g')})
+    ss['unc_current'] = edited
+    unc_table = U.mark_edited(U.check_table(edited))
+    with st.expander('**How the default values were determined**'):
+        st.markdown(U.DEFAULTS_TEXT)
+    with st.expander('**How to estimate your own values**'):
+        st.markdown(U.OWN_VALUES_TEXT)
+    st.caption(U.method_text(unc_n, U.SEED))
+if use_unc:
     mc = monte_carlo(base, unc_table, int(unc_n))
     if mc['fails']:
         st.warning(f"PHREEQC did not converge in {mc['fails']} sample-realisation(s); those are left out of "
@@ -746,8 +756,9 @@ if view == 'Classical diagrams':
         if fig is not None:
             show(fig, 'stiff', 'dl_stiff')
     else:
-        st.caption('Drawn by WQChartPy (Yang et al., 2022, Groundwater) in its own style. '
-                   'Not yet restyled to match the rest of the app.')
+        st.caption('Diagram geometry and sample positions from WQChartPy (Yang et al., 2022, Groundwater). '
+                   'This app sets the text to plain type and adds the uncertainty; the layout and '
+                   'markers are otherwise WQChartPy\'s.')
         wq_unc = 'Off'
         if mc is not None:
             wq_unc = st.radio('Uncertainty on this diagram', plots.PIPER_UNC_MODES, horizontal=True,

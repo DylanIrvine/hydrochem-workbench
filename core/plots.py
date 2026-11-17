@@ -736,7 +736,7 @@ def _wq_add_uncertainty(fig, pts, mode):
 
 
 def wqchartpy_figure(v, kind, letters=None, letters_pos=PANEL_LABEL_POS[0], unc=None, unc_mode='Clouds'):
-    # Durov, Gibbs, Chadha, HFE-D from WQChartPy as is, with the uncertainty added
+    # Durov, Gibbs, Chadha, HFE-D drawn by WQChartPy, then plain text and the uncertainty added
     # WQChartPy saves a file itself, so send that to a temp folder and keep the figure
     import importlib
     import matplotlib.pyplot as plt
@@ -787,7 +787,8 @@ def wqchartpy_figure(v, kind, letters=None, letters_pos=PANEL_LABEL_POS[0], unc=
         t.set_fontfamily(FONT)
     matplotlib.rcdefaults()
     matplotlib.rcParams['mathtext.default'] = 'regular'
-    _wq_add_uncertainty(fig, pts, unc_mode)
+    if unc is not None and unc_mode != 'Off' and not _wq_add_uncertainty(fig, pts, unc_mode):
+        note = (note + ' ' if note else '') + 'The uncertainty could not be drawn on this diagram.'
     # panel letters for the diagrams with more than one panel (the Gibbs pair)
     if len(fig.axes) > 1:
         panel_letters(fig.axes, letters, letters_pos, outside_only=True)
