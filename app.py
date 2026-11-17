@@ -431,6 +431,8 @@ with st.sidebar:
                             key=opt('opt_unc_n', U.DEFAULT_N), disabled=not use_unc,
                             help='More realisations give smoother intervals and take longer. '
                                  f'{U.DEFAULT_N} is enough for the 5th and 95th percentiles.')
+    unc_col = st.color_picker('Uncertainty colour', key=opt('opt_unc_colour', '#666666'), disabled=not use_unc,
+                              help='Colour of the interval lines, error bars, clouds and outlines on every plot.')
     show_unc = st.checkbox('Show and edit the uncertainty values', key=opt('opt_unc_show', False),
                            disabled=not use_unc,
                            help='Shows the table of uncertainties used for each input, how the defaults were '
@@ -558,7 +560,8 @@ else:
         st.markdown(U.OWN_VALUES_TEXT)
     st.caption(U.method_text(unc_n, U.SEED))
 if use_unc:
-    mc = monte_carlo(base, unc_table, int(unc_n))
+    # the colour goes with the result to the plots (a new dict, the kept result is not changed)
+    mc = dict(monte_carlo(base, unc_table, int(unc_n)), colour=unc_col)
     if mc['fails']:
         st.warning(f"PHREEQC did not converge in {mc['fails']} sample-realisation(s); those are left out of "
                    'the intervals.')
@@ -888,6 +891,7 @@ if view == 'Export':
         ('Uncertainty', 'Included', 'Yes' if mc is not None else 'No'),
         ('Uncertainty', 'Method', U.method_text(mc['n'], mc['seed']) if mc is not None else ''),
         ('Uncertainty', 'Inputs', 'See the Uncertainty inputs sheet' if mc is not None else ''),
+        ('Uncertainty', 'Colour', unc_col if mc is not None else ''),
         ('Uncertainty', 'Piper display', ss.get('opt_piper_unc', 'Clouds') if mc is not None else ''),
         ('Uncertainty', 'Durov, Gibbs, Chadha, HFE-D display', ss.get('opt_wq_unc', 'Clouds') if mc is not None else ''),
         ('Guidelines', 'Sets', guide_txt),
@@ -924,9 +928,10 @@ if view == 'Export':
                'With the uncertainty analysis on, three more sheets: the inputs used, the 5th and 95th '
                'percentiles beside every derived variable, and a per-sample summary (probability of the '
                'same water type, Chadha field, charge balance within 5 % and each SI above zero). '
-               'The figure zip has every figure the app draws (Piper, Schoeller, Stiff, Durov, Gibbs, '
-               'Chadha, HFE-D, the gallery, the custom plot and the guideline bar chart), for the plotted '
-               'groups only and with the options chosen on each view. File names start with the dataset name.')
+               'The figure zip has every figure the app draws, for the plotted groups only and with the '
+               'options chosen on each view, in three folders: classical (Piper, Schoeller, Stiff, Durov, '
+               'Gibbs, Chadha, HFE-D), gallery, and custom plots (the custom plot and the guideline bar '
+               'chart). File names start with the dataset name.')
 
     st.subheader('All figures')
     dpi = st.selectbox('Resolution', [300, 600], key=opt('opt_dpi', 300, [300, 600]))
@@ -948,7 +953,7 @@ if view == 'Export':
                 z.writestr(name, plots.fig_png(fig, dpi))
                 plt.close(fig)
 
-            add('piper.png', plots.piper(vp, color_by=by('piper_color'),
+            add('classical/piper.png', plots.piper(vp, color_by=by('piper_color'),
                                          water_legend=ss.get('opt_piper_legend', False),
                                          show_types=ss.get('opt_piper_types', True),
                                          unc=mc, unc_mode=ss.get('opt_piper_unc', 'Clouds')))
@@ -977,7 +982,7 @@ if view == 'Export':
             cx = ss.get('opt_custom_x', 'Cl (mmol/L)')
             cy = ss.get('opt_custom_y', 'Na (mmol/L)')
             if cx in nc and cy in nc:
-                add('custom_plot.png', plots.custom(
+                add('custom plots/custom_plot.png', plots.custom(
                     vp, cx, cy, xlog=ss.get('opt_custom_xlog', False), ylog=ss.get('opt_custom_ylog', False),
                     one_to_one=ss.get('opt_custom_one', False), zero_line=ss.get('opt_custom_zero', False),
                     annotate=ss.get('opt_custom_labels', False), color_by=by('custom_color'), unc=mc))
@@ -988,7 +993,7 @@ if view == 'Export':
                 notes.append('Guideline bar chart: not included (open the Guidelines view and choose one).')
             elif g_row['var'] in vp.columns:
                 mode_one = ss.get('opt_gchart_barmode') == 'One colour'
-                add('guideline_bar_chart.png', plots.guideline_bars(
+                add('custom plots/guideline_bar_chart.png', plots.guideline_bars(
                     vp, g_row['var'], guidelines.chart_lines(vp, g_row),
                     bar_colour=ss.get('opt_gchart_barcol', '#0089D0') if mode_one else None,
                     highlight=ss.get('opt_gchart_hlcol', '#000000') if ss.get('opt_gchart_hl') else None,

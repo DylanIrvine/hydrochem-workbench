@@ -86,7 +86,7 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    every option used, the group colours and markers, and any replaced below-LOR
    values; with the uncertainty analysis on, the inputs used, the 5th and 95th
    percentiles beside every derived variable, and the per-sample summary. A zip
-   of all figures. File names start with the dataset name.
+   of all figures, in classical, gallery and custom plots folders. File names start with the dataset name.
 8. **Several datasets, same settings.** "Load another dataset" replaces the data
    and keeps every setting (units, below-LOR, missing values, plot options,
    group colours and markers, guidelines), so several sites, or an edited sheet,
