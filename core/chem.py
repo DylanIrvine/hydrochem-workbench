@@ -527,6 +527,28 @@ def piper_coords(meq):
                          'an_y': an_y, 'd_x': d_x, 'd_y': d_y})
 
 
+# Chadha (1999) fields 5 to 8 (the quadrants of the diagram). Fields 1 to 4 are
+# the half-planes, so every sample is also in two of them. Many later papers number
+# the quadrants 1 to 4 instead, so the type is given with the number
+CHADHA_FIELDS = {
+    5: 'Ca-Mg-HCO3 type: alkaline earths exceed alkali metals and weak acid anions exceed strong acid anions',
+    6: 'Ca-Mg-Cl/SO4 type: alkaline earths exceed alkali metals and strong acid anions exceed weak acid anions',
+    7: 'Na-Cl/SO4 type: alkali metals exceed alkaline earths and strong acid anions exceed weak acid anions',
+    8: 'Na-HCO3 type: alkali metals exceed alkaline earths and weak acid anions exceed strong acid anions',
+}
+
+
+def chadha_field(x, y):
+    # x = meq% (Ca+Mg) - (Na+K) of cations; y = meq% (HCO3+CO3) - (Cl+SO4) of anions
+    if pd.isna(x) or pd.isna(y):
+        return ''
+    if x == 0 or y == 0:
+        return 'On a field boundary'
+    if x > 0:
+        return '5' if y > 0 else '6'
+    return '8' if y > 0 else '7'
+
+
 def water_type(p, q):
     # water type from the shaded field in the Piper diamond
     # p = (Ca+Mg)/cations, q = (SO4+Cl)/anions, in meq
@@ -645,6 +667,10 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
     pan = meq['HCO3'] + meq['CO3'].fillna(0) + meq['Cl'] + meq['SO4']
     v['Water type'] = [water_type(a, b) for a, b in
                        zip((meq['Ca'] + meq['Mg']) / pcat, (meq['SO4'] + meq['Cl']) / pan)]
+    # Chadha (1999) diagram coordinates and field
+    v['Chadha x (meq%)'] = 100 * (meq['Ca'] + meq['Mg'] - meq['Na'] - k0) / pcat
+    v['Chadha y (meq%)'] = 100 * (meq['HCO3'] + meq['CO3'].fillna(0) - meq['Cl'] - meq['SO4']) / pan
+    v['Chadha field'] = [chadha_field(a, b) for a, b in zip(v['Chadha x (meq%)'], v['Chadha y (meq%)'])]
 
     for c in extra_cols:
         v[c] = df[c]
@@ -693,7 +719,7 @@ def hollow_mask(v, cols):
     return mask
 
 
-INTERNAL_COLS = {'Sample', 'Label', 'Color', 'Marker', 'Water type', 'Filled', 'Alkalinity from',
+INTERNAL_COLS = {'Sample', 'Label', 'Color', 'Marker', 'Water type', 'Chadha field', 'Filled', 'Alkalinity from',
                  'HCO3, CO3 from', 'HCO3 is input', 'CO3 is input',
                  'TDS is measured', 'filled_pH', 'filled_Temp', 'filled_HCO3'}
 

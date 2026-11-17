@@ -313,3 +313,40 @@ def test_chart_lines_and_bars():
     assert plots.guideline_bars(v, 'EC', guidelines.chart_lines(v, ec), bar_colour='#123456', log=True)
     labels = [lab for lab, _, _ in guidelines.chart_rows()]
     assert all('Infiltration' not in l for l in labels)       # the SAR with EC table is not a bar chart
+
+
+def test_chadha_fields():
+    assert chem.chadha_field(40, 30) == '5' and chem.chadha_field(40, -30) == '6'
+    assert chem.chadha_field(-40, -30) == '7' and chem.chadha_field(-40, 30) == '8'
+    assert chem.chadha_field(0, 10) == 'On a field boundary' and chem.chadha_field(np.nan, 1) == ''
+    # a Ca-HCO3 water lands in 5, a Na-Cl water in 7
+    t, _ = run(pd.concat([
+        one_sample(Sample='caco3', pH=7.5, Temp=25, Ca=60, Mg=10, Na=10, K=1, Cl=10, SO4=10, Total_Alk_CaCO3=180),
+        one_sample(Sample='nacl', pH=7.5, Temp=25, Ca=10, Mg=5, Na=300, K=5, Cl=450, SO4=40, Total_Alk_CaCO3=50),
+    ], ignore_index=True))
+    assert list(t['Chadha field']) == ['5', '7']
+    assert t.loc[0, 'Chadha x (meq%)'] > 0 and t.loc[1, 'Chadha y (meq%)'] < 0
+
+
+def test_panel_letters_styles_and_gibbs():
+    from matplotlib.figure import Figure
+    from core import plots
+    fig = Figure()
+    axs = fig.subplots(1, 3)
+    for style, want in [('(a)', ['(a)', '(b)', '(c)']), ('a)', ['a)', 'b)', 'c)']), ('a', ['a', 'b', 'c']),
+                        ('a.', ['a.', 'b.', 'c.']), ('A', ['A', 'B', 'C'])]:
+        for ax in axs:
+            for t in list(ax.texts):
+                t.remove()
+        plots.panel_letters(axs, style)
+        assert [ax.texts[0].get_text() for ax in axs] == want
+        x, y = axs[0].texts[0].get_position()
+        assert (x, y) == (0.95, 0.92)          # default: top right, inside
+    plots.panel_letters(axs, None)              # no letters: nothing added
+    # the Gibbs pair gets letters; single-panel diagrams do not
+    t, _ = run(pd.concat([one_sample(Sample=f's{i}', pH=7.2, Temp=25, Ca=20 + i, Mg=5, Na=30, K=2, Cl=40, SO4=20,
+                                     Total_Alk_CaCO3=60, TDS=200 + i) for i in range(3)], ignore_index=True))
+    gibbs, _ = plots.wqchartpy_figure(t, 'Gibbs', letters='(a)')
+    assert [a.texts[-1].get_text() for a in gibbs.axes] == ['(a)', '(b)']
+    chadha, _ = plots.wqchartpy_figure(t, 'Chadha', letters='(a)')
+    assert not any(tx.get_text() == '(a)' for a in chadha.axes for tx in a.texts)

@@ -113,27 +113,43 @@ def pretty(name):
 
 
 # panel letters for multipanel figures
-PANEL_LABELS = {'(a)': '({})', 'a)': '{})', 'a.': '{}.', 'A': '{}'}
-PANEL_LABEL_POS = ['Top right, above the panel', 'Top left, above the panel',
-                   'Top right, inside the panel', 'Top left, inside the panel']
+PANEL_LABELS = {'(a)': '({})', 'a)': '{})', 'a': '{}', 'a.': '{}.', 'A': '{}'}
+PANEL_LABEL_POS = ['Top right, inside the panel', 'Top left, inside the panel',
+                   'Top right, above the panel', 'Top left, above the panel']
 
 
-def panel_letters(axs, style=None, pos=PANEL_LABEL_POS[0]):
+def panel_letters(axs, style=None, pos=PANEL_LABEL_POS[0], headroom=True, outside_only=False):
     # style is a key of PANEL_LABELS (None for no letters)
+    # headroom: with letters inside, raise the top of each y axis so the band the
+    # letter sits in is clear of data. outside_only: always put the letters above
+    # the panels (for diagrams whose axes should not be changed)
     if not style or style not in PANEL_LABELS:
         return
     right = 'right' in pos
-    inside = 'inside' in pos
+    inside = 'inside' in pos and not outside_only
+    if inside and headroom:
+        for ax in axs:
+            y0, y1 = ax.get_ylim()
+            if ax.get_yscale() == 'log' and y0 > 0 and y1 > y0:
+                ax.set_ylim(y0, 10 ** (np.log10(y0) + (np.log10(y1) - np.log10(y0)) / 0.84))
+            elif ax.get_yscale() == 'linear' and y1 > y0:
+                ax.set_ylim(y0, y0 + (y1 - y0) / 0.84)
     for k, ax in enumerate(axs):
         letter = chr(ord('a') + k) if k < 26 else chr(ord('a') + k // 26 - 1) + chr(ord('a') + k % 26)
         if style == 'A':
             letter = letter.upper()
         text = PANEL_LABELS[style].format(letter)
-        x = 0.97 if (right and inside) else (1.0 if right else (0.03 if inside else 0.0))
-        y = 0.96 if inside else 1.02
-        ax.text(x, y, text, transform=ax.transAxes, ha='right' if right else 'left',
-                va='top' if inside else 'bottom', fontsize=9, zorder=30,
-                bbox=dict(fc='white', ec='none', pad=0.5, alpha=0.8) if inside else None)
+        # inside: centred near (0.95, 0.92) or (0.05, 0.92) in axes fractions, on a light
+        # backing so it stays readable over data
+        if inside:
+            x, y, va = (0.95 if right else 0.05), 0.92, 'center'
+        else:
+            x, y, va = (1.0 if right else 0.0), 1.02, 'bottom'
+        # same size as the figure's axis labels (WQChartPy figures use larger text)
+        size = max(9.0, float(ax.xaxis.label.get_size()))
+        ax.text(x, y, text, transform=ax.transAxes, ha='right' if right else 'left', va=va,
+                fontsize=size, zorder=30,
+                bbox=dict(fc='white', ec='none', pad=1.0, alpha=0.8) if inside else None)
 
 
 def group_styles(v):
@@ -383,7 +399,7 @@ def stiff(v, samples, ncols=4, letters=None, letters_pos=PANEL_LABEL_POS[0]):
         fig.subplots_adjust(left=0.07, right=0.93, top=1 - 0.5 / (3.6 * nrows + 1.2),
                             bottom=1.3 / (3.6 * nrows + 1.2), wspace=0.55, hspace=0.75)
         for ax, i in zip(axs, sub.index):
-            r = sub.loc[i, need].fillna(0).astype(float)
+            r = sub.loc[i, need].astype(float).fillna(0)
             x = [-r.iloc[0], -r.iloc[1], -r.iloc[2], r.iloc[5], r.iloc[4], r.iloc[3], -r.iloc[0]]
             y = [3, 2, 1, 1, 2, 3, 3]
             col, _ = styles[sub.at[i, 'Label']]
@@ -416,7 +432,7 @@ def stiff(v, samples, ncols=4, letters=None, letters_pos=PANEL_LABEL_POS[0]):
 WQ_DIAGRAMS = {'Durov': 'durvo', 'Gibbs': 'gibbs', 'Chadha': 'chadha', 'HFE-D': 'hfed'}
 
 
-def wqchartpy_figure(v, kind):
+def wqchartpy_figure(v, kind, letters=None, letters_pos=PANEL_LABEL_POS[0]):
     # Durov, Gibbs, Chadha, HFE-D from WQChartPy as is
     # WQChartPy saves a file itself, so send that to a temp folder and keep the figure
     import importlib
@@ -465,6 +481,9 @@ def wqchartpy_figure(v, kind):
         t.set_fontfamily(FONT)
     matplotlib.rcdefaults()
     matplotlib.rcParams['mathtext.default'] = 'regular'
+    # panel letters for the diagrams with more than one panel (the Gibbs pair)
+    if len(fig.axes) > 1:
+        panel_letters(fig.axes, letters, letters_pos, outside_only=True)
     return fig, note
 
 

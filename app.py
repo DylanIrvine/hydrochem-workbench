@@ -32,7 +32,7 @@ from core import chem, guidelines, plots, usage
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.10.0'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.10.1'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -384,10 +384,13 @@ with st.sidebar:
     log_conc = st.checkbox('Log axes on concentration plots', key=opt('opt_log_conc', False),
                            help='Useful when fresh and saline samples share a plot.')
     letters = st.selectbox('Panel letters (multipanel figures)', ['None'] + list(plots.PANEL_LABELS),
-                           key=opt('opt_letters', 'None'), help='For the gallery pages and the Stiff grid.')
+                           key=opt('opt_letters', 'None', ['None'] + list(plots.PANEL_LABELS)),
+                           help='For every figure with more than one panel: the gallery pages, the Stiff '
+                                'grid and the Gibbs diagram.')
     letters = None if letters == 'None' else letters
     letters_pos = st.selectbox('Panel letter position', plots.PANEL_LABEL_POS,
-                               key=opt('opt_letters_pos', plots.PANEL_LABEL_POS[0]), disabled=letters is None)
+                               key=opt('opt_letters_pos', plots.PANEL_LABEL_POS[0], plots.PANEL_LABEL_POS),
+                               disabled=letters is None)
 
 HOW = {'Mean of the dataset': 'mean', 'Fixed value': 'value', 'From charge balance': 'balance'}
 rules = (('pH', (HOW[ph_how], ph_val)), ('Temp', (HOW[t_how], t_val)), ('HCO3', (HOW[h_how], h_val)))
@@ -496,7 +499,7 @@ if view == 'Data and checks':
     c3.metric('Charge balance within 5 %', f'{int(cbe_ok)} of {int(v["CBE (%)"].notna().sum())}')
     c4.metric('Filled samples', n_filled)
 
-    summary_cols = ['Sample', 'Label', 'Water type', 'CBE (%)', 'TDS (mg/L)', 'pH',
+    summary_cols = ['Sample', 'Label', 'Water type', 'Chadha field', 'CBE (%)', 'TDS (mg/L)', 'pH',
                     'Alkalinity (mg/L as CaCO3)', 'HCO3 (mg/L)', 'CO3 (mg/L)', 'HCO3, CO3 from', 'log pCO2',
                     'Ionic strength (mol/kgw)'] + [c for c in v.columns if c.startswith('SI ') and v[c].notna().any()] + ['Filled']
     st.subheader('Summary')
@@ -654,7 +657,7 @@ if view == 'Classical diagrams':
     else:
         st.caption('Drawn by WQChartPy (Yang et al., 2022, Groundwater) in its own style. '
                    'Not yet restyled to match the rest of the app.')
-        fig, note = plots.wqchartpy_figure(vp, kind)
+        fig, note = plots.wqchartpy_figure(vp, kind, letters=letters, letters_pos=letters_pos)
         if note:
             st.warning(note)
         if fig is None:
@@ -662,6 +665,28 @@ if view == 'Classical diagrams':
         else:
             show(fig, kind.lower(), 'dl_wq')
             plt.close(fig)
+        if kind == 'Chadha':
+            st.markdown(
+                'The axes are differences in milliequivalent percentages: (Ca + Mg) less (Na + K) as a '
+                'percentage of the cations, and (HCO3 + CO3) less (Cl + SO4) as a percentage of the anions. '
+                'Chadha (1999) numbered eight fields:\n'
+                '- **1** (right half): alkaline earths exceed alkali metals.\n'
+                '- **2** (left half): alkali metals exceed alkaline earths.\n'
+                '- **3** (upper half): weak acid anions (HCO3 + CO3) exceed strong acid anions (Cl + SO4).\n'
+                '- **4** (lower half): strong acid anions exceed weak acid anions.\n'
+                + ''.join(f'- **{k}** ({q}): {chem.CHADHA_FIELDS[k]}.\n' for k, q in
+                          [(5, 'upper right'), (6, 'lower right'), (7, 'lower left'), (8, 'upper left')]))
+            st.caption(
+                'Fields 5 to 8 are often read as processes: 5 as recharge water, 6 as reverse ion exchange, '
+                '7 as end-member (e.g. seawater-influenced or evaporated) water, and 8 as base (normal) ion '
+                'exchange. Those readings are interpretations and need supporting evidence, such as '
+                'chloro-alkaline indices or Na/Cl ratios. Many later papers number the four quadrants 1 to 4 '
+                'instead of 5 to 8, so check which scheme a paper uses. Samples close to the axes are only weakly '
+                'one type or the other. The field of each sample is in the Chadha field column of the results '
+                'download.')
+            counts = vp['Chadha field'].value_counts()
+            st.dataframe(pd.DataFrame({'Field': counts.index, 'Samples': counts.values}),
+                         hide_index=True)
 
 # %% view: gallery
 if view == 'Diagnostic gallery':
@@ -771,23 +796,80 @@ if view == 'Export':
                'groups not plotted). The Settings sheet records every option used (units, below-LOR, '
                'missing values, groups, plot options, guidelines), with the group colours and markers '
                'and any replaced below-LOR values on their own sheets, so the run can be reproduced. '
-               'The figure zip uses the plotted groups only. File names start with the dataset name.')
+               'The figure zip has every figure the app draws (Piper, Schoeller, Stiff, Durov, Gibbs, '
+               'Chadha, HFE-D, the gallery, the custom plot and the guideline bar chart), for the plotted '
+               'groups only and with the options chosen on each view. File names start with the dataset name.')
 
     st.subheader('All figures')
     dpi = st.selectbox('Resolution', [300, 600], key=opt('opt_dpi', 300, [300, 600]))
     if vp.empty:
         st.info('No groups are ticked to plot, so there are no figures to build.')
     elif st.button('Build a zip of every figure'):
+        # every figure the app draws, with the choices made on each view
+        # (colour-by, Piper options, custom plot and guideline chart selections)
+        ss = st.session_state
+        by = lambda key: None if ss.get(key, 'Group (Label)') in ('Group (Label)', None) or \
+            ss.get(key) not in vp.columns else ss.get(key)
+        notes = []
         zbuf = io.BytesIO()
-        with zipfile.ZipFile(zbuf, 'w', zipfile.ZIP_DEFLATED) as z:
-            z.writestr('piper.png', plots.fig_png(plots.piper(vp), dpi))
-            z.writestr('schoeller.png', plots.fig_png(plots.schoeller(vp), dpi))
+        with st.spinner('Drawing every figure ...'), zipfile.ZipFile(zbuf, 'w', zipfile.ZIP_DEFLATED) as z:
+            def add(name, fig):
+                if fig is None:
+                    notes.append(f'{name}: not drawn (not enough data).')
+                    return
+                z.writestr(name, plots.fig_png(fig, dpi))
+                plt.close(fig)
+
+            add('piper.png', plots.piper(vp, color_by=by('piper_color'),
+                                         water_legend=ss.get('opt_piper_legend', False),
+                                         show_types=ss.get('opt_piper_types', True)))
+            add('classical/schoeller.png', plots.schoeller(vp))
+            # Stiff: every plotted sample, MAX_STIFF to a page
+            samples = list(vp['Sample'])
+            for k in range(0, len(samples), MAX_STIFF):
+                add(f'classical/stiff_{k // MAX_STIFF + 1}.png',
+                    plots.stiff(vp, samples[k:k + MAX_STIFF], letters=letters, letters_pos=letters_pos))
+            for kind in plots.WQ_DIAGRAMS:
+                fig, note = plots.wqchartpy_figure(vp, kind, letters=letters, letters_pos=letters_pos)
+                if note:
+                    notes.append(f'{kind}: {note}')
+                add(f'classical/{kind.lower()}.png', fig)
             for gname, gpanels in plots.GALLERY.items():
                 gp = [p for p in gpanels if plots.available(vp, p)]
                 for k in range(0, len(gp), PANELS_PER_PAGE):
                     f = plots.gallery_page(vp, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc,
-                                          letters=letters, letters_pos=letters_pos)
+                                          color_by=by('gallery_color'), letters=letters, letters_pos=letters_pos)
                     fname = gname.lower().replace(' ', '_').replace('/', '-')
-                    z.writestr(f'gallery/{fname}_{k // PANELS_PER_PAGE + 1}.png', plots.fig_png(f, dpi))
+                    add(f'gallery/{fname}_{k // PANELS_PER_PAGE + 1}.png', f)
+            # custom plot, as last set on its view
+            nc = numeric_choices
+            cx = ss.get('opt_custom_x', 'Cl (mmol/L)')
+            cy = ss.get('opt_custom_y', 'Na (mmol/L)')
+            if cx in nc and cy in nc:
+                add('custom_plot.png', plots.custom(
+                    vp, cx, cy, xlog=ss.get('opt_custom_xlog', False), ylog=ss.get('opt_custom_ylog', False),
+                    one_to_one=ss.get('opt_custom_one', False), zero_line=ss.get('opt_custom_zero', False),
+                    annotate=ss.get('opt_custom_labels', False), color_by=by('custom_color')))
+            # guideline bar chart, as last set on the Guidelines view
+            rows = {lab: g for lab, _, g in guidelines.chart_rows(guide_region, guide_eco)}
+            g_row = rows.get(ss.get('opt_gchart_rule'))
+            if g_row is None:
+                notes.append('Guideline bar chart: not included (open the Guidelines view and choose one).')
+            elif g_row['var'] in vp.columns:
+                mode_one = ss.get('opt_gchart_barmode') == 'One colour'
+                add('guideline_bar_chart.png', plots.guideline_bars(
+                    vp, g_row['var'], guidelines.chart_lines(vp, g_row),
+                    bar_colour=ss.get('opt_gchart_barcol', '#0089D0') if mode_one else None,
+                    highlight=ss.get('opt_gchart_hlcol', '#000000') if ss.get('opt_gchart_hl') else None,
+                    line_colour=ss.get('opt_gchart_linecol', '#222222'),
+                    log=ss.get('opt_gchart_log', False), sort=ss.get('opt_gchart_sort', False)))
+            if notes:
+                z.writestr('notes.txt', '\n'.join(notes) + '\n')
+            figure_names = z.namelist()
+        st.caption(f'{len([n for n in figure_names if n.endswith(".png")])} figures in the zip.')
+        st.session_state['zip_contents'] = figure_names   # for the tests
         st.download_button('Download figures (.zip)', zbuf.getvalue(), file_name=f'{stem}_hydrochem_figures.zip',
                            mime='application/zip')
+        if notes:
+            st.caption('Some figures were left out or trimmed (also listed in notes.txt in the zip): '
+                       + ' '.join(notes))

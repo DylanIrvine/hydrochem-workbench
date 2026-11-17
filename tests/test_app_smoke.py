@@ -3,6 +3,11 @@ import os
 
 from streamlit.testing.v1 import AppTest
 
+
+def plots_gallery_sets():
+    from core import plots
+    return list(plots.GALLERY)
+
 APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app.py')
 
 
@@ -87,6 +92,14 @@ def test_app_runs_on_example_data(tmp_path, monkeypatch):
     assert not at.exception
     go('Export')
     assert any(b.label == 'Build a zip of every figure' for b in at.button)
+    [b for b in at.button if b.label == 'Build a zip of every figure'][0].click().run()
+    assert not at.exception
+    names = at.session_state['zip_contents']
+    for want in ['piper.png', 'classical/schoeller.png', 'classical/stiff_1.png', 'classical/durov.png',
+                 'classical/gibbs.png', 'classical/chadha.png', 'classical/hfe-d.png', 'custom_plot.png',
+                 'guideline_bar_chart.png']:
+        assert want in names, want
+    assert sum(n.startswith('gallery/') for n in names) >= len(plots_gallery_sets())
     # should still be 1
     assert any('sessions that have processed data: 1' in c.value for c in at.caption)
 
