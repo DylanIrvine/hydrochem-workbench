@@ -39,6 +39,7 @@ import matplotlib.colors as mcolors
 from matplotlib import font_manager
 import matplotlib.text
 import matplotlib.patches
+from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
@@ -205,8 +206,118 @@ def _legend_handles(styles, any_hollow):
     return handles
 
 
+# %% uncertainty
+# light grey for every uncertainty mark (interval lines, Piper clouds and outlines)
+UNC_COLOUR = '0.75'
+UNC_LW = 0.6
+PIPER_UNC_MODES = ['Clouds', 'Outlines', 'Off']
+
+
+def _unc_cols(unc, v, col):
+    # 5th and 95th percentiles of one column, lined up with v (None if not available)
+    if unc is None or col not in unc['lo'].columns:
+        return None, None
+    return unc['lo'][col].reindex(v.index), unc['hi'][col].reindex(v.index)
+
+
+def _interval_lines(ax, x, y, xlo=None, xhi=None, ylo=None, yhi=None, xlog=False, ylog=False):
+    # light grey interval lines through each point (x and y). The axis limits are
+    # left to the points, so a very wide interval runs off the panel
+    segs = []
+    ok = x.notna() & y.notna()
+    for lo, hi, along_x, log in [(xlo, xhi, True, xlog), (ylo, yhi, False, ylog)]:
+        if lo is None:
+            continue
+        val = x if along_x else y
+        lo = lo.where(lo.notna(), val)
+        hi = hi.where(hi.notna(), val)
+        if log:
+            lo = lo.where(lo > 0, val)
+        for i in val.index[ok]:
+            if lo[i] == hi[i]:
+                continue
+            if along_x:
+                segs.append([(lo[i], y[i]), (hi[i], y[i])])
+            else:
+                segs.append([(x[i], lo[i]), (x[i], hi[i])])
+    if segs:
+        ax.add_collection(LineCollection(segs, colors=UNC_COLOUR, linewidths=UNC_LW, zorder=5), autolim=False)
+    return bool(segs)
+
+
+def _unc_handle(label=None):
+    return Line2D([], [], color=UNC_COLOUR, lw=1.0, label=label or 'Uncertainty (90 % interval)')
+
+
+def _hull(pts):
+    # convex hull (monotone chain), counter-clockwise, first point not repeated
+    pts = sorted(set(map(tuple, pts)))
+    if len(pts) < 3:
+        return pts
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lower, upper = [], []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def central_outline(px, py, keep=0.90):
+    # outline of the central 90 % of one sample's realisations: the convex hull of the
+    # points with the smallest Mahalanobis distance from their mean
+    pts = np.column_stack([px, py])
+    pts = pts[np.isfinite(pts).all(axis=1)]
+    if len(pts) < 5:
+        return None
+    c = pts - pts.mean(axis=0)
+    cov = np.cov(c.T)
+    d = np.einsum('ij,jk,ik->i', c, np.linalg.pinv(cov), c)
+    inner = pts[d <= np.quantile(d, keep)]
+    hull = _hull(np.round(inner, 9))
+    if len(hull) < 2:
+        return None
+    return np.array(hull + [hull[0]])
+
+
+def _piper_unc(ax, v, unc, mode):
+    # realisations on the Piper: all of them as small grey dots (clouds), or an
+    # outline round the central 90 % of each sample (outlines)
+    if unc is None or mode == 'Off' or not unc.get('piper'):
+        return None
+    pairs = [('piper_cat_x', 'piper_cat_y'), ('piper_an_x', 'piper_an_y'), ('piper_d_x', 'piper_d_y')]
+    drawn = False
+    for xc, yc in pairs:
+        if xc not in unc['piper'] or yc not in unc['piper']:
+            continue
+        px = unc['piper'][xc].reindex(v.index).to_numpy(dtype=float)
+        py = unc['piper'][yc].reindex(v.index).to_numpy(dtype=float)
+        if mode == 'Clouds':
+            ok = np.isfinite(px) & np.isfinite(py)
+            if ok.any():
+                ax.scatter(px[ok], py[ok], s=1.2, color=UNC_COLOUR, lw=0, zorder=50)
+                drawn = True
+        else:
+            for k in range(len(px)):
+                line = central_outline(px[k], py[k])
+                if line is not None:
+                    ax.plot(line[:, 0], line[:, 1], color=UNC_COLOUR, lw=UNC_LW + 0.1, zorder=50)
+                    drawn = True
+    if not drawn:
+        return None
+    if mode == 'Clouds':
+        return Line2D([], [], ls='', marker='o', ms=2, mfc=UNC_COLOUR, mec='none',
+                      label='Monte Carlo realisations')
+    return Line2D([], [], color=UNC_COLOUR, lw=1.0, label='Central 90 % of realisations')
+
+
 # %% Piper
-def piper(v, color_by=None, water_legend=False, show_types=True):
+def piper(v, color_by=None, water_legend=False, show_types=True, unc=None, unc_mode='Clouds'):
     # Piper diagram, adapted from WQChartPy triangle_piper with coloured fields
     with matplotlib.rc_context(STYLE):
         offset = 0.10
@@ -306,6 +417,9 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
             ax.text(1.62 + offset, 1.2 * h - 0.02, 'Na-Cl', color=PIPER['Na-Cl'], **kw)
             ax.text(1.0 + offset, yc + s60 - h - 0.49, 'Na-HCO$_3$', color=PIPER['Na-HCO3'], **kw)
 
+        # uncertainty behind the samples
+        unc_handle = _piper_unc(ax, v, unc, unc_mode)
+
         # plot the samples
         styles = group_styles(v)
         hollow = hollow_mask(v, ['piper'])
@@ -329,6 +443,8 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
                                       label='Filled input (hollow)'))
         else:
             handles = _legend_handles(styles, (hollow & plotted).any())
+        if unc_handle is not None:
+            handles.append(unc_handle)
         ax.legend(handles=handles, frameon=False, labelspacing=0.3, handletextpad=0.3,
                   loc='upper right', bbox_to_anchor=(1.02, 1.0))
 
@@ -347,7 +463,7 @@ def piper(v, color_by=None, water_legend=False, show_types=True):
 
 
 # %% Schoeller
-def schoeller(v):
+def schoeller(v, unc=None):
     # Schoeller diagram (meq/L, log scale)
     ions = ['Ca', 'Mg', 'Na', 'K', 'Cl', 'SO4', 'HCO3']
     ticks = ['Ca$^{2+}$', 'Mg$^{2+}$', 'Na$^+$', 'K$^+$', 'Cl$^-$', 'SO$_4^{2-}$', 'HCO$_3^-$']
@@ -365,6 +481,15 @@ def schoeller(v):
             col, mk = styles[v.at[i, 'Label']]
             ax.plot(xs, y, color=col, marker=mk, ms=3.5, lw=0.8, alpha=0.8, mec='black', mew=0.3,
                     ls='--' if hollow[i] else '-')
+            if unc is not None:
+                segs = []
+                for xk, a in zip(xs, ions):
+                    lo, hi = _unc_cols(unc, v, f'{a} (meq/L)')
+                    if lo is not None and np.isfinite(y[xk - 1]) and lo[i] > 0 and hi[i] > lo[i]:
+                        segs.append([(xk, lo[i]), (xk, hi[i])])
+                if segs:
+                    ax.add_collection(LineCollection(segs, colors=UNC_COLOUR, linewidths=UNC_LW + 0.4,
+                                                     zorder=1), autolim=False)
         ax.set_yscale('log')
         ax.set_xticks(xs)
         ax.set_xticklabels(ticks)
@@ -376,6 +501,8 @@ def schoeller(v):
                    for lab, (col, mk) in styles.items()]
         if hollow.any():
             handles.append(Line2D([], [], color='0.3', ls='--', lw=0.8, label='Filled HCO$_3$ (dashed)'))
+        if unc is not None:
+            handles.append(_unc_handle())
         ax.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(1.01, 1.0))
     return fig
 
@@ -698,7 +825,7 @@ def _gibbs_field(ax, outline):
     ax.fill(xs, ys, facecolor='0.85', edgecolor='0.4', lw=0.6, ls='--', alpha=0.6, zorder=0)
 
 
-def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
+def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None):
     x, y = v[panel['x']], v[panel['y']]
     xlog = panel.get('xlog', False) or (log_conc and panel.get('conc', False))
     ylog = panel.get('ylog', False) or (log_conc and panel.get('conc', False))
@@ -708,6 +835,9 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
         y = y.where(y > 0)
     hollow = hollow_mask(v, [panel['x'], panel['y']])
     mappable = _scatter(ax, v, x, y, hollow, styles, cvals=cvals, legend=False)
+    xlo, xhi = _unc_cols(unc, v, panel['x'])
+    ylo, yhi = _unc_cols(unc, v, panel['y'])
+    has_unc = _interval_lines(ax, x, y, xlo, xhi, ylo, yhi, xlog=xlog, ylog=ylog)
 
     ok = x.notna() & y.notna()
     if xlog:
@@ -813,10 +943,12 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None):
     keep += [(Line2D([], [], ls='', marker=''), n) for n in panel.get('notes', [])]
     if keep:
         ax.legend(*zip(*keep), frameon=False, fontsize=6, loc='best', handlelength=2.2, labelspacing=0.3)
+    ax._has_unc = has_unc
     return mappable, hollow & ok
 
 
-def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters_pos=PANEL_LABEL_POS[0]):
+def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters_pos=PANEL_LABEL_POS[0],
+                 unc=None):
     # up to 6 panels (2 x 3) with one legend along the bottom
     panels = [p for p in panels if available(v, p)]
     if not panels:
@@ -832,11 +964,13 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
         fig.subplots_adjust(left=0.1, right=0.86 if color_by else 0.98, top=1 - 0.3 / height,
                             bottom=2.2 / height, hspace=0.42, wspace=0.3)
         any_hollow = False
+        any_unc = False
         mappable = None
         for ax, p in zip(axs, panels):
-            m, hol = _draw_panel(ax, v, p, styles, log_conc, cvals=cvals)
+            m, hol = _draw_panel(ax, v, p, styles, log_conc, cvals=cvals, unc=unc)
             mappable = m or mappable
             any_hollow = any_hollow or bool(hol.any())
+            any_unc = any_unc or ax._has_unc
         for ax in axs[n:]:
             ax.axis('off')
         panel_letters(axs[:n], letters, letters_pos)
@@ -850,6 +984,8 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
                                       label='Filled input (hollow)'))
         else:
             handles = _legend_handles(styles, any_hollow)
+        if any_unc:
+            handles.append(_unc_handle())
         fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.0),
                    ncol=min(4, len(handles)), frameon=False)
     return fig
@@ -857,7 +993,7 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
 
 # %% custom plot
 def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zero_line=False,
-           annotate=False):
+           annotate=False, unc=None):
     # user picks x and y
     panel = dict(x=x, y=y, xlog=xlog, ylog=ylog, lines=[], origin=True)
     if one_to_one:
@@ -869,7 +1005,7 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
     with matplotlib.rc_context(STYLE):
         fig = Figure(figsize=(17 * CM, 10 * CM), dpi=150)
         ax = fig.add_axes([0.1, 0.13, 0.58, 0.83])
-        mappable, hol = _draw_panel(ax, v, panel, styles, False, cvals=cvals)
+        mappable, hol = _draw_panel(ax, v, panel, styles, False, cvals=cvals, unc=unc)
         if annotate:
             ok = v[x].notna() & v[y].notna()
             for i in v.index[ok]:
@@ -885,13 +1021,15 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
                                       label='Filled input (hollow)'))
         else:
             handles = _legend_handles(styles, bool(hol.any()))
+        if ax._has_unc:
+            handles.append(_unc_handle())
         fig.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(0.69, 0.96))
     return fig
 
 
 # %% bar chart against a guideline
 def guideline_bars(v, var, lines, bar_colour=None, highlight=None, line_colour='#222222',
-                   log=False, sort=False, title=None):
+                   log=False, sort=False, title=None, unc=None):
     # one bar per sample, with the guideline as dashed line(s)
     # lines: list of (label, per-sample threshold Series) from guidelines.chart_lines
     # bar_colour None = group colours; highlight = hatch colour for bars outside the guideline
@@ -927,6 +1065,18 @@ def guideline_bars(v, var, lines, bar_colour=None, highlight=None, line_colour='
                    width=0.75, zorder=2.5)
             ax.bar(ox, d.loc[outside, var], color='none', edgecolor='black', linewidth=0.4, width=0.75,
                    zorder=2.6)
+        unc_drawn = False
+        ulo, uhi = _unc_cols(unc, d, var)
+        if ulo is not None:
+            val = d[var]
+            down = (val - ulo).clip(lower=0).fillna(0)
+            if log:
+                down = down.where(ulo > 0, 0)
+            up = (uhi - val).clip(lower=0).fillna(0)
+            if (down > 0).any() or (up > 0).any():
+                ax.errorbar(x, val, yerr=[down.to_numpy(), up.to_numpy()], fmt='none', ecolor=UNC_COLOUR,
+                            elinewidth=UNC_LW + 0.3, capsize=2, capthick=UNC_LW + 0.3, zorder=2.8)
+                unc_drawn = True
         dashes = ['--', (0, (6, 2, 1, 2))]
         handles = []
         for k, (label, thr) in enumerate(lines):
@@ -950,6 +1100,8 @@ def guideline_bars(v, var, lines, bar_colour=None, highlight=None, line_colour='
         else:
             ax.set_ylim(bottom=min(0, float(d[var].min()) * 1.05))
             tops = [float(t.max()) for _, t in lines if t.notna().any()]
+            if ulo is not None and uhi.notna().any():
+                tops.append(float(uhi.max()))
             top = max([float(d[var].max())] + tops)
             ax.set_ylim(top=top * 1.08 if top > 0 else None)
         if title:
@@ -960,6 +1112,8 @@ def guideline_bars(v, var, lines, bar_colour=None, highlight=None, line_colour='
         if highlight and outside.any():
             handles.append(matplotlib.patches.Patch(facecolor='white', edgecolor=highlight, hatch='////',
                                                     lw=0.4, label='Outside the guideline'))
+        if unc_drawn:
+            handles.append(_unc_handle())
         if handles:
             ax.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(1.01, 1.0),
                       fontsize=7)

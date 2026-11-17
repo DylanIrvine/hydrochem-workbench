@@ -27,12 +27,12 @@ import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
 
 import core
-from core import chem, guidelines, plots, usage
+from core import chem, guidelines, plots, uncertainty, usage
 
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.10.1'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.11.0'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -40,7 +40,7 @@ APP_VERSION = '0.10.1'   # keep the same as VERSION in core/__init__.py
 if getattr(core, 'VERSION', None) != APP_VERSION:
     import importlib
     importlib.reload(core)
-    for _m in (chem, guidelines, plots, usage):
+    for _m in (chem, guidelines, plots, uncertainty, usage):
         importlib.reload(_m)
 
 _record_use, _usage_status = usage.increment, usage.status
@@ -60,6 +60,7 @@ st.set_page_config(page_title=APP_NAME, page_icon='logo/favicon.png', layout='ce
 # whole session, so a new dataset is processed with the same choices
 KEEP = ('opt_', 'grp_show_', 'grp_col_', 'grp_mk_', 'guide_', 'piper_color', 'gallery_color',
         'custom_color')
+U = uncertainty
 for _k in list(st.session_state.keys()):
     if _k.startswith(KEEP):
         st.session_state[_k] = st.session_state[_k]
@@ -99,7 +100,11 @@ st.write(
     'Australian, WHO and FAO (irrigation) water quality guidelines with a bar chart against any of them, a Piper diagram, the '
     'classical diagrams, a gallery of diagnostic ion, ratio and saturation-index plots with '
     'reference lines, and a builder for any plot the gallery does not have. The database is '
-    'phreeqc.dat, so results are for fresh water; saline samples are flagged.')
+    'phreeqc.dat, so results are for fresh water; saline samples are flagged.\n\n'
+    'Optionally, the measurement uncertainty of every input (laboratory uncertainty, values below the '
+    'limit of reporting, field probe accuracy) can be carried through the whole calculation by Monte '
+    'Carlo, so saturation indices, ratios, charge balance and water type come with an interval, or a '
+    'probability, instead of a single number.')
 
 
 # %% usage counter
@@ -250,6 +255,12 @@ with st.expander('**How to cite and references**'):
         'NHMRC and NRMMC (2011, with later updates). Australian Drinking Water Guidelines 6. National '
         'Health and Medical Research Council, Canberra. '
         'https://guidelines.nhmrc.gov.au/australian-drinking-water-guidelines\n\n'
+        '**Uncertainty analysis**\n\n'
+        'JCGM (2008). Evaluation of measurement data: Supplement 1 to the Guide to the expression of '
+        'uncertainty in measurement. Propagation of distributions using a Monte Carlo method. JCGM 101:2008. '
+        'https://www.bipm.org/en/committees/cc/wg/jcgm\n\n'
+        'JCGM (2008). Evaluation of measurement data: Guide to the expression of uncertainty in '
+        'measurement. JCGM 100:2008. (Rectangular distributions for instrument specifications.)\n\n'
         '**Other**\n\n'
         'Gimenez-Forcada, E. (2010). Dynamic of sea water interface using hydrochemical facies '
         'evolution diagram. Groundwater, 48(2), 212-216. '
@@ -268,6 +279,8 @@ def process(raw, unit, n_as_n, p_as_p, dic_unit, rules, lor):
     # below-LOR substitution, clean, convert, fill, run PHREEQC
     # lor = (fraction, text, negative)
     # results are kept in session_state (not st.cache_data) so nothing is held after the user leaves
+    # returns (results, dropped cells, PHREEQC errors, problems, replaced below-LOR values,
+    #          what the uncertainty analysis needs)
     key = hashlib.sha1((raw.to_csv() + repr((unit, n_as_n, p_as_p, dic_unit, rules, lor))).encode()).hexdigest()
     cached = st.session_state.get('result')
     if cached is not None and cached[0] == key:
@@ -275,19 +288,36 @@ def process(raw, unit, n_as_n, p_as_p, dic_unit, rules, lor):
 
     with st.spinner('Running PHREEQC ...'):
         fraction, lor_text, lor_neg = lor
-        raw, replaced = chem.below_lor(raw, fraction, text=lor_text, negative=lor_neg)
+        raw, replaced = chem.below_lor(raw, fraction, text=lor_text, negative=lor_neg, rows=True)
+        below = {(r.Row, r.Column): float(r.LOR) for r in replaced.itertuples()}
+        replaced = replaced.drop(columns='Row')
         df, dropped, extra_cols, problems = chem.clean(raw)
         # duplicates are flagged but still run
         if any(not p.startswith('Duplicate') for p in problems):
-            out = (None, dropped, None, problems, replaced)
+            out = (None, dropped, None, problems, replaced, None)
         else:
-            mmol, alk_source = chem.to_mmol(df, unit, n_as_n, p_as_p, dic_unit)
-            df, mmol, filled = chem.fill_missing(df, mmol, dict(rules))
-            phreeqc, errors, mmol = chem.run_phreeqc(df, mmol, get_phreeqc())
-            out = (chem.build_table(df, mmol, filled, phreeqc, extra_cols, alk_source), dropped, errors, problems,
-                   replaced)
+            settings = dict(unit=unit, n_as_n=n_as_n, p_as_p=p_as_p, dic_unit=dic_unit, rules=rules,
+                            extra_cols=tuple(extra_cols))
+            v, errors = chem.derive(df, get_phreeqc(), **settings)
+            out = (v, dropped, errors, problems, replaced,
+                   dict(key=key, df=df, below=below, settings=settings))
     st.session_state['result'] = (key, out)
     return out
+
+
+def monte_carlo(base, table, n):
+    # the uncertainty analysis, kept for the session until an input or setting changes
+    key = hashlib.sha1((base['key'] + table.to_csv() + str(n)).encode()).hexdigest()
+    cached = st.session_state.get('mc')
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    bar = st.progress(0.0, text=f'Uncertainty analysis: {n} realisations through PHREEQC ...')
+    mc = U.run(base['df'], base['below'], table, base['settings'], get_phreeqc(), n=n,
+               progress=lambda f: bar.progress(f, text=f'Uncertainty analysis: {int(round(f * n))} of {n} '
+                                                       'realisations'))
+    bar.empty()
+    st.session_state['mc'] = (key, mc)
+    return mc
 
 
 def show(fig, name, key):
@@ -392,6 +422,18 @@ with st.sidebar:
                                key=opt('opt_letters_pos', plots.PANEL_LABEL_POS[0], plots.PANEL_LABEL_POS),
                                disabled=letters is None)
 
+    st.header('6. Uncertainty')
+    use_unc = st.checkbox('Include uncertainty analysis', key=opt('opt_unc', False),
+                          help='Carries the measurement uncertainty of every input through the whole '
+                               'calculation (Monte Carlo). Intervals are drawn as light grey lines.')
+    unc_n = st.number_input('Realisations', min_value=20, max_value=2000, step=50,
+                            key=opt('opt_unc_n', U.DEFAULT_N), disabled=not use_unc,
+                            help='More realisations give smoother intervals and take longer. '
+                                 f'{U.DEFAULT_N} is enough for the 5th and 95th percentiles.')
+    if use_unc:
+        st.caption('The uncertainty of each input is set in the "Uncertainty inputs" panel above the views. '
+                   f'Intervals are {U.INTERVAL} (5th to 95th percentile).')
+
 HOW = {'Mean of the dataset': 'mean', 'Fixed value': 'value', 'From charge balance': 'balance'}
 rules = (('pH', (HOW[ph_how], ph_val)), ('Temp', (HOW[t_how], t_val)), ('HCO3', (HOW[h_how], h_val)))
 
@@ -407,8 +449,8 @@ else:
     st.info('Upload a filled template, or tick the synthetic example in the sidebar, to begin.')
     st.stop()
 
-v, dropped, errors, problems, replaced = process(raw, unit, n_choice.startswith('As N'), p_choice.endswith('as P'),
-                                                 dic_unit, rules, (lor_fraction, lor_text, lor_neg))
+v, dropped, errors, problems, replaced, base = process(raw, unit, n_choice.startswith('As N'), p_choice.endswith('as P'),
+                                                       dic_unit, rules, (lor_fraction, lor_text, lor_neg))
 for p in problems:
     st.error(p)
 if v is None:
@@ -477,6 +519,40 @@ with st.expander(f'**Groups (Label): colours, markers and which to plot** ({len(
     st.caption('Unticked groups are left off every plot. The tables and the results download '
                'keep all samples.')
 
+# %% uncertainty inputs and the Monte Carlo run
+ss = st.session_state
+ss.setdefault('unc_base', U.default_table())
+mc = None
+unc_table = U.check_table(ss.get('unc_current', ss['unc_base']))
+if not use_unc:
+    # keep any edits for when the analysis is switched back on
+    ss['unc_base'] = unc_table
+    ss.pop('unc_editor', None)
+else:
+    with st.expander(f'**Uncertainty inputs** ({U.INTERVAL} intervals, {unc_n} realisations)'):
+        st.caption(U.LOR_NOTE + ' Defaults: major ions, alkalinity, NO3, Br and F from the laboratory '
+                   'control sample recoveries in 19 quality-control reports from an Australian laboratory '
+                   '(surface water and groundwater, 2021 to 2026); pH, temperature and EC from the YSI '
+                   'ProDSS specifications; the rest are placeholders. Replace any of them with values for '
+                   'your laboratory and instruments.')
+        if st.button('Reset to defaults', key='unc_reset'):
+            ss['unc_base'] = U.default_table()
+            ss.pop('unc_editor', None)
+            ss.pop('unc_current', None)
+        edited = st.data_editor(
+            ss['unc_base'], key='unc_editor', hide_index=True, num_rows='fixed', width='stretch',
+            disabled=['Variable', 'Source'],
+            column_config={'LOR': st.column_config.NumberColumn(min_value=0.0, format='%g'),
+                           'Relative SD (%)': st.column_config.NumberColumn(min_value=0.0, format='%g'),
+                           'Absolute SD': st.column_config.NumberColumn(min_value=0.0, format='%g')})
+        ss['unc_current'] = edited
+        unc_table = U.mark_edited(U.check_table(edited))
+        st.caption(U.method_text(unc_n, U.SEED))
+    mc = monte_carlo(base, unc_table, int(unc_n))
+    if mc['fails']:
+        st.warning(f"PHREEQC did not converge in {mc['fails']} sample-realisation(s); those are left out of "
+                   'the intervals.')
+
 v = v.copy()
 v['Color'] = v['Label'].map(lambda l: group_style[l][0])
 v['Marker'] = v['Label'].map(lambda l: group_style[l][1])
@@ -511,6 +587,15 @@ if view == 'Data and checks':
                'Saturation indices and pCO2 always come from the alkalinity (or DIC) and pH. '
                'CBE is signed: positive means excess cations. TDS is the measured value where '
                'given, otherwise the sum of ions with bicarbonate x 0.4917.')
+
+    if mc is not None:
+        st.subheader('Uncertainty')
+        st.dataframe(U.summary(v, mc).round(1), width='stretch', hide_index=True)
+        st.caption(f"How often the {mc['n']} realisations agree with the measured result: the same water type "
+                   '(Piper), the same Chadha field, a charge balance within 5 %, and each saturation index above '
+                   'zero (oversaturated). Values near 50 % mean the data cannot say which side the sample is on. '
+                   f'CBE 5th and 95th percentiles bound the {U.INTERVAL} interval. Samples with a filled pH, '
+                   'temperature or alkalinity carry no uncertainty for the filled value itself.')
 
     if n_replaced:
         st.subheader('Values below the LOR that were replaced')
@@ -612,7 +697,7 @@ if view == 'Guidelines':
             fig = plots.guideline_bars(vp, g_var, guidelines.chart_lines(vp, g_row),
                                        bar_colour=bar_col if bar_mode == 'One colour' else None,
                                        highlight=hl_col if hl else None, line_colour=line_col,
-                                       log=g_log, sort=g_sort)
+                                       log=g_log, sort=g_sort, unc=mc)
             if fig is None:
                 st.info('No plotted sample has a value for this parameter.')
             else:
@@ -634,8 +719,14 @@ if view == 'Piper':
     p_color = c1.selectbox('Colour by', color_opts, key=opt('piper_color', color_opts[0], color_opts))
     p_types = c2.checkbox('Water-type labels', key=opt('opt_piper_types', True))
     p_legend = c3.checkbox('Legend for the coloured fields', key=opt('opt_piper_legend', False))
+    p_unc = 'Off'
+    if mc is not None:
+        p_unc = st.radio('Uncertainty on the Piper', plots.PIPER_UNC_MODES, horizontal=True,
+                         key=opt('opt_piper_unc', 'Clouds', plots.PIPER_UNC_MODES),
+                         help='Clouds: every realisation as a small grey dot. Outlines: a line round the '
+                              'central 90 % of each sample\'s realisations. Off is cleaner for large datasets.')
     fig = plots.piper(vp, color_by=None if p_color.startswith('Group') else p_color,
-                      water_legend=p_legend, show_types=p_types)
+                      water_legend=p_legend, show_types=p_types, unc=mc, unc_mode=p_unc)
     show(fig, 'piper', 'dl_piper')
     not_shown = int(vp['piper_d_x'].isna().sum())
     if not_shown:
@@ -646,7 +737,7 @@ if view == 'Classical diagrams':
     kinds = ['Schoeller', 'Stiff'] + list(plots.WQ_DIAGRAMS)
     kind = st.selectbox('Diagram', kinds, key=opt('opt_classical', kinds[0], kinds))
     if kind == 'Schoeller':
-        show(plots.schoeller(vp), 'schoeller', 'dl_schoeller')
+        show(plots.schoeller(vp, unc=mc), 'schoeller', 'dl_schoeller')
     elif kind == 'Stiff':
         samples = list(vp['Sample'])
         chosen = st.multiselect('Samples', samples, key=opt('opt_stiff_samples', samples[:12], samples),
@@ -656,7 +747,8 @@ if view == 'Classical diagrams':
             show(fig, 'stiff', 'dl_stiff')
     else:
         st.caption('Drawn by WQChartPy (Yang et al., 2022, Groundwater) in its own style. '
-                   'Not yet restyled to match the rest of the app.')
+                   'Not yet restyled to match the rest of the app.' +
+                   (' Uncertainty is not drawn on these diagrams.' if mc is not None else ''))
         fig, note = plots.wqchartpy_figure(vp, kind, letters=letters, letters_pos=letters_pos)
         if note:
             st.warning(note)
@@ -701,14 +793,16 @@ if view == 'Diagnostic gallery':
     for k in range(0, len(panels), PANELS_PER_PAGE):
         fig = plots.gallery_page(vp, panels[k:k + PANELS_PER_PAGE], log_conc=log_conc,
                                  letters=letters, letters_pos=letters_pos,
-                                 color_by=None if g_color.startswith('Group') else g_color)
+                                 color_by=None if g_color.startswith('Group') else g_color, unc=mc)
         show(fig, f'{group.lower().replace(" ", "_").replace("/", "-")}_{k // PANELS_PER_PAGE + 1}',
              f'dl_gallery_{k}')
     if skipped:
         st.caption(f'{skipped} panel(s) skipped because the data do not include those variables.')
     st.caption('Ratios are molar unless the label says meq. Seawater lines use standard mean seawater. '
                'Reference lines, shaded bands and the notes in the legends are guides to interpretation, '
-               'not fitted to the data: check them against what you know of the geology.')
+               'not fitted to the data: check them against what you know of the geology.' +
+               (f' Grey lines are {U.INTERVAL} intervals from the uncertainty analysis; the axes are set by the '
+                'points, so a wide interval can run off the panel.' if mc is not None else ''))
 
 # %% view: custom
 if view == 'Custom plot':
@@ -724,7 +818,7 @@ if view == 'Custom plot':
     zero = c4.checkbox('y = 0 line', key=opt('opt_custom_zero', False))
     ann = c5.checkbox('Label samples', key=opt('opt_custom_labels', False))
     fig = plots.custom(vp, cx, cy, xlog=xlog, ylog=ylog, one_to_one=one, zero_line=zero, annotate=ann,
-                       color_by=None if cc.startswith('Group') else cc)
+                       color_by=None if cc.startswith('Group') else cc, unc=mc)
     show(fig, 'custom_plot', 'dl_custom')
 
 # %% view: export
@@ -769,6 +863,10 @@ if view == 'Export':
         ('Plots', 'Custom plot', f"x = {ss.get('opt_custom_x', '')}, y = {ss.get('opt_custom_y', '')}, "
                                  f"colour by {ss.get('custom_color', 'Group (Label)')}"),
         ('Plots', 'Figure zip resolution (dpi)', ss.get('opt_dpi', 300)),
+        ('Uncertainty', 'Included', 'Yes' if mc is not None else 'No'),
+        ('Uncertainty', 'Method', U.method_text(mc['n'], mc['seed']) if mc is not None else ''),
+        ('Uncertainty', 'Inputs', 'See the Uncertainty inputs sheet' if mc is not None else ''),
+        ('Uncertainty', 'Piper display', ss.get('opt_piper_unc', 'Clouds') if mc is not None else ''),
         ('Guidelines', 'Sets', guide_txt),
         ('Guidelines', 'Bar chart', f"{ss.get('opt_gchart_var', '')}: {ss.get('opt_gchart_rule', '')}"),
     ]
@@ -789,6 +887,10 @@ if view == 'Export':
             g_summary, g_flags = guidelines.assess(v, guide_sets, guide_region, guide_eco)
             g_summary.to_excel(xl, sheet_name='Guidelines', index=False)
             g_flags.to_excel(xl, sheet_name='Guidelines by sample', index=False)
+        if mc is not None:
+            U.summary(v, mc).to_excel(xl, sheet_name='Uncertainty summary', index=False)
+            U.interval_table(v, mc).to_excel(xl, sheet_name='Uncertainty intervals', index=False)
+            unc_table.to_excel(xl, sheet_name='Uncertainty inputs', index=False)
     stem = os.path.splitext(data_name)[0].replace(' ', '_') if not use_example else 'example'
     st.download_button('Download results (.xlsx)', buf.getvalue(), file_name=f'{stem}_hydrochem_results.xlsx',
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -796,6 +898,9 @@ if view == 'Export':
                'groups not plotted). The Settings sheet records every option used (units, below-LOR, '
                'missing values, groups, plot options, guidelines), with the group colours and markers '
                'and any replaced below-LOR values on their own sheets, so the run can be reproduced. '
+               'With the uncertainty analysis on, three more sheets: the inputs used, the 5th and 95th '
+               'percentiles beside every derived variable, and a per-sample summary (probability of the '
+               'same water type, Chadha field, charge balance within 5 % and each SI above zero). '
                'The figure zip has every figure the app draws (Piper, Schoeller, Stiff, Durov, Gibbs, '
                'Chadha, HFE-D, the gallery, the custom plot and the guideline bar chart), for the plotted '
                'groups only and with the options chosen on each view. File names start with the dataset name.')
@@ -822,8 +927,9 @@ if view == 'Export':
 
             add('piper.png', plots.piper(vp, color_by=by('piper_color'),
                                          water_legend=ss.get('opt_piper_legend', False),
-                                         show_types=ss.get('opt_piper_types', True)))
-            add('classical/schoeller.png', plots.schoeller(vp))
+                                         show_types=ss.get('opt_piper_types', True),
+                                         unc=mc, unc_mode=ss.get('opt_piper_unc', 'Clouds')))
+            add('classical/schoeller.png', plots.schoeller(vp, unc=mc))
             # Stiff: every plotted sample, MAX_STIFF to a page
             samples = list(vp['Sample'])
             for k in range(0, len(samples), MAX_STIFF):
@@ -838,7 +944,8 @@ if view == 'Export':
                 gp = [p for p in gpanels if plots.available(vp, p)]
                 for k in range(0, len(gp), PANELS_PER_PAGE):
                     f = plots.gallery_page(vp, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc,
-                                          color_by=by('gallery_color'), letters=letters, letters_pos=letters_pos)
+                                          color_by=by('gallery_color'), letters=letters, letters_pos=letters_pos,
+                                          unc=mc)
                     fname = gname.lower().replace(' ', '_').replace('/', '-')
                     add(f'gallery/{fname}_{k // PANELS_PER_PAGE + 1}.png', f)
             # custom plot, as last set on its view
@@ -849,7 +956,7 @@ if view == 'Export':
                 add('custom_plot.png', plots.custom(
                     vp, cx, cy, xlog=ss.get('opt_custom_xlog', False), ylog=ss.get('opt_custom_ylog', False),
                     one_to_one=ss.get('opt_custom_one', False), zero_line=ss.get('opt_custom_zero', False),
-                    annotate=ss.get('opt_custom_labels', False), color_by=by('custom_color')))
+                    annotate=ss.get('opt_custom_labels', False), color_by=by('custom_color'), unc=mc))
             # guideline bar chart, as last set on the Guidelines view
             rows = {lab: g for lab, _, g in guidelines.chart_rows(guide_region, guide_eco)}
             g_row = rows.get(ss.get('opt_gchart_rule'))
@@ -862,7 +969,7 @@ if view == 'Export':
                     bar_colour=ss.get('opt_gchart_barcol', '#0089D0') if mode_one else None,
                     highlight=ss.get('opt_gchart_hlcol', '#000000') if ss.get('opt_gchart_hl') else None,
                     line_colour=ss.get('opt_gchart_linecol', '#222222'),
-                    log=ss.get('opt_gchart_log', False), sort=ss.get('opt_gchart_sort', False)))
+                    log=ss.get('opt_gchart_log', False), sort=ss.get('opt_gchart_sort', False), unc=mc))
             if notes:
                 z.writestr('notes.txt', '\n'.join(notes) + '\n')
             figure_names = z.namelist()

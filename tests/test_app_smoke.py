@@ -163,3 +163,27 @@ def test_settings_survive_loading_another_dataset(tmp_path, monkeypatch):
     at.radio(key='opt_view').set_value('Export').run()
     assert not at.exception
     assert any(b.label == 'Download results (.xlsx)' for b in at.get('download_button'))
+
+
+def test_app_with_uncertainty(tmp_path, monkeypatch):
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    at = AppTest.from_file(APP, default_timeout=300)
+    at.run()
+    at.checkbox(key='opt_example').check().run()
+    at.checkbox(key='opt_unc').check().run()
+    at.number_input(key='opt_unc_n').set_value(20).run()
+    assert not at.exception
+    assert any(e.label.startswith('**Uncertainty inputs**') for e in at.expander)
+    for view in ['Data and checks', 'Guidelines', 'Piper', 'Classical diagrams', 'Diagnostic gallery',
+                 'Custom plot', 'Export']:
+        at.radio(key='opt_view').set_value(view).run()
+        assert not at.exception
+    at.radio(key='opt_view').set_value('Piper').run()
+    for mode in ['Outlines', 'Off', 'Clouds']:
+        at.radio(key='opt_piper_unc').set_value(mode).run()
+        assert not at.exception
+    # off and on again keeps working
+    at.checkbox(key='opt_unc').uncheck().run()
+    assert not at.exception
+    at.checkbox(key='opt_unc').check().run()
+    assert not at.exception

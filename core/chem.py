@@ -224,13 +224,14 @@ CONC_COLS = list(ANALYTES) + ALK_COLS + [DIC_COL]
 _NOT_CONC = set(ID_COLS + STYLE_COLS + ['pH', 'Temp', 'EC'])
 
 
-def below_lor(raw, fraction=0.5, text=True, negative=True):
+def below_lor(raw, fraction=0.5, text=True, negative=True, rows=False):
     # replace below-LOR values with fraction x LOR, before clean()
     # text: "<0.05" style cells, in the concentration columns, TDS and any extra column
     # negative: negative numbers in the concentration columns (labs that report -0.05 for <0.05)
     # returns (raw with the values replaced, table of what was replaced)
+    # rows=True adds a Row column (the row index), used by the uncertainty analysis
     out = raw.copy()
-    rows = []
+    found = []
     sample = out['Sample'] if 'Sample' in out.columns else pd.Series(out.index, index=out.index)
     for c in out.columns:
         if c in _NOT_CONC:
@@ -247,9 +248,10 @@ def below_lor(raw, fraction=0.5, text=True, negative=True):
                     lor = abs(float(num))
             if lor is not None:
                 out.at[i, c] = lor * fraction
-                rows.append({'Sample': sample[i], 'Column': c, 'Value': val, 'LOR': lor,
-                             'Used': lor * fraction})
-    return out, pd.DataFrame(rows, columns=['Sample', 'Column', 'Value', 'LOR', 'Used'])
+                found.append({'Sample': sample[i], 'Column': c, 'Value': val, 'LOR': lor,
+                              'Used': lor * fraction, 'Row': i})
+    cols = ['Sample', 'Column', 'Value', 'LOR', 'Used'] + (['Row'] if rows else [])
+    return out, pd.DataFrame(found, columns=['Sample', 'Column', 'Value', 'LOR', 'Used', 'Row'])[cols]
 
 
 # %% read and clean
@@ -503,6 +505,19 @@ def run_phreeqc(df, mmol, pp):
     mmol.loc[c_only, 'CO3'] = c[c_only]
     mmol.loc[c_only, 'HCO3'] = (alk - 2 * c).clip(lower=0)[c_only]
     return out, pd.DataFrame(errors, columns=['Sample', 'Error']), mmol
+
+
+# %% the whole calculation for one dataset
+def derive(df, pp, unit='mg/L', n_as_n=False, p_as_p=False, dic_unit='mg/L as C', rules=None,
+           extra_cols=()):
+    # cleaned data -> results table. Used for the measured data and for every
+    # realisation of the uncertainty analysis, so both go through the same steps
+    rules = dict(rules) if rules is not None else {'pH': ('mean', 7.0), 'Temp': ('mean', 25.0),
+                                                    'HCO3': ('mean', 100.0)}
+    mmol, alk_source = to_mmol(df, unit, n_as_n, p_as_p, dic_unit)
+    df, mmol, filled = fill_missing(df, mmol, rules)
+    phreeqc, errors, mmol = run_phreeqc(df, mmol, pp)
+    return build_table(df, mmol, filled, phreeqc, list(extra_cols), alk_source), errors
 
 
 # %% derived variables

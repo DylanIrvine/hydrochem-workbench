@@ -61,10 +61,29 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
      TDS, Cl, pH, their own ions and each other, the carbonate system,
      irrigation quality (SAR, percent Na) and quality checks
    - Custom plot: any variable against any other
-6. **Export.** Results table with every derived variable, a Settings sheet with
+6. **Uncertainty (optional).** Measurement uncertainty is carried through the
+   whole calculation by Monte Carlo (JCGM 101:2008), 200 realisations by default.
+   Each measured value is drawn from a normal distribution with standard
+   deviation sqrt((LOR/sqrt(12))^2 + (relative SD x value)^2 + absolute SD^2),
+   and values below the LOR on the lab report from Uniform(0, LOR). Every
+   realisation goes through the same unit conversion, fills, PHREEQC and derived
+   variables as the measured data. Results are 90 % intervals (5th to 95th
+   percentile), drawn as light grey lines on the gallery, custom, Schoeller and
+   guideline bar plots, and as grey clouds or outlines (or off) on the Piper; the
+   points stay at the measured values. A per-sample summary gives the share of
+   realisations with the same water type and Chadha field, a charge balance
+   within 5 % and each saturation index above zero. Every input (LOR, relative
+   and absolute SD) is editable in the app. Defaults: major ions, alkalinity,
+   NO3, Br and F from laboratory control sample recoveries in 19 quality-control
+   reports from an Australian laboratory (surface water and groundwater, 2021 to
+   2026); pH, temperature and EC from the YSI ProDSS specifications (rectangular,
+   a/sqrt(3)); the rest are placeholders. `core/uncertainty.py` has the method.
+7. **Export.** Results table with every derived variable, a Settings sheet with
    every option used, the group colours and markers, and any replaced below-LOR
-   values; a zip of all figures. File names start with the dataset name.
-7. **Several datasets, same settings.** "Load another dataset" replaces the data
+   values; with the uncertainty analysis on, the inputs used, the 5th and 95th
+   percentiles beside every derived variable, and the per-sample summary. A zip
+   of all figures. File names start with the dataset name.
+8. **Several datasets, same settings.** "Load another dataset" replaces the data
    and keeps every setting (units, below-LOR, missing values, plot options,
    group colours and markers, guidelines), so several sites, or an edited sheet,
    can be run the same way.
@@ -93,6 +112,7 @@ usage statistics.
     core/guidelines.py  guideline values and the comparison
     core/gibbs_fields.py  outline of the Gibbs envelope (from WQChartPy)
     core/plots.py     all figures
+    core/uncertainty.py  Monte Carlo uncertainty analysis and its default inputs
     core/usage.py     the usage counter
     packages.txt      system font for Streamlit Cloud (Liberation Sans)
     logo/             hex badge (svg, png) and favicon

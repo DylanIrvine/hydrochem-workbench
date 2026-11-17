@@ -1,2 +1,2 @@
 # keep the same as APP_VERSION in app.py
-VERSION = '0.10.1'
+VERSION = '0.11.0'
