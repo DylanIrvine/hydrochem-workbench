@@ -213,6 +213,11 @@ UNC_LW = 0.7
 PIPER_UNC_MODES = ['Clouds', 'Outlines', 'Off']
 
 
+def unc_colour(unc):
+    # the colour chosen in the app (kept in the uncertainty result), or the default
+    return (unc or {}).get('colour') or UNC_COLOUR
+
+
 def _unc_cols(unc, v, col):
     # 5th and 95th percentiles of one column, lined up with v (None if not available)
     if unc is None or col not in unc['lo'].columns:
@@ -220,7 +225,8 @@ def _unc_cols(unc, v, col):
     return unc['lo'][col].reindex(v.index), unc['hi'][col].reindex(v.index)
 
 
-def _interval_lines(ax, x, y, xlo=None, xhi=None, ylo=None, yhi=None, xlog=False, ylog=False):
+def _interval_lines(ax, x, y, xlo=None, xhi=None, ylo=None, yhi=None, xlog=False, ylog=False,
+                    colour=UNC_COLOUR):
     # light grey interval lines through each point (x and y). The axis limits are
     # left to the points, so a very wide interval runs off the panel
     segs = []
@@ -241,12 +247,12 @@ def _interval_lines(ax, x, y, xlo=None, xhi=None, ylo=None, yhi=None, xlog=False
             else:
                 segs.append([(x[i], lo[i]), (x[i], hi[i])])
     if segs:
-        ax.add_collection(LineCollection(segs, colors=UNC_COLOUR, linewidths=UNC_LW, zorder=5), autolim=False)
+        ax.add_collection(LineCollection(segs, colors=colour, linewidths=UNC_LW, zorder=5), autolim=False)
     return bool(segs)
 
 
-def _unc_handle(label=None):
-    return Line2D([], [], color=UNC_COLOUR, lw=1.0, label=label or 'Uncertainty (90 % interval)')
+def _unc_handle(label=None, colour=UNC_COLOUR):
+    return Line2D([], [], color=colour, lw=1.0, label=label or 'Uncertainty (90 % interval)')
 
 
 def _hull(pts):
@@ -290,6 +296,7 @@ def _piper_unc(ax, v, unc, mode):
     # outline round the central 90 % of each sample (outlines)
     if unc is None or mode == 'Off' or not unc.get('piper'):
         return None
+    col = unc_colour(unc)
     pairs = [('piper_cat_x', 'piper_cat_y'), ('piper_an_x', 'piper_an_y'), ('piper_d_x', 'piper_d_y')]
     drawn = False
     for xc, yc in pairs:
@@ -300,20 +307,20 @@ def _piper_unc(ax, v, unc, mode):
         if mode == 'Clouds':
             ok = np.isfinite(px) & np.isfinite(py)
             if ok.any():
-                ax.scatter(px[ok], py[ok], s=1.2, color=UNC_COLOUR, lw=0, zorder=50)
+                ax.scatter(px[ok], py[ok], s=1.2, color=col, lw=0, zorder=50)
                 drawn = True
         else:
             for k in range(len(px)):
                 line = central_outline(px[k], py[k])
                 if line is not None:
-                    ax.plot(line[:, 0], line[:, 1], color=UNC_COLOUR, lw=UNC_LW + 0.1, zorder=50)
+                    ax.plot(line[:, 0], line[:, 1], color=col, lw=UNC_LW + 0.1, zorder=50)
                     drawn = True
     if not drawn:
         return None
     if mode == 'Clouds':
-        return Line2D([], [], ls='', marker='o', ms=2, mfc=UNC_COLOUR, mec='none',
+        return Line2D([], [], ls='', marker='o', ms=2, mfc=col, mec='none',
                       label='Monte Carlo realisations')
-    return Line2D([], [], color=UNC_COLOUR, lw=1.0, label='Central 90 % of realisations')
+    return Line2D([], [], color=col, lw=1.0, label='Central 90 % of realisations')
 
 
 # %% Piper
@@ -488,7 +495,7 @@ def schoeller(v, unc=None):
                     if lo is not None and np.isfinite(y[xk - 1]) and lo[i] > 0 and hi[i] > lo[i]:
                         segs.append([(xk, lo[i]), (xk, hi[i])])
                 if segs:
-                    ax.add_collection(LineCollection(segs, colors=UNC_COLOUR, linewidths=UNC_LW + 0.4,
+                    ax.add_collection(LineCollection(segs, colors=unc_colour(unc), linewidths=UNC_LW + 0.4,
                                                      zorder=1), autolim=False)
         ax.set_yscale('log')
         ax.set_xticks(xs)
@@ -502,7 +509,7 @@ def schoeller(v, unc=None):
         if hollow.any():
             handles.append(Line2D([], [], color='0.3', ls='--', lw=0.8, label='Filled HCO$_3$ (dashed)'))
         if unc is not None:
-            handles.append(_unc_handle())
+            handles.append(_unc_handle(colour=unc_colour(unc)))
         ax.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(1.01, 1.0))
     return fig
 
@@ -675,7 +682,7 @@ def _far_from_cluster(x, y, k=8.0):
     return out | ~ok
 
 
-def _wq_add_uncertainty(fig, pts, mode):
+def _wq_add_uncertainty(fig, pts, mode, colour=UNC_COLOUR, kind=None):
     # draw the recorded realisations on the WQChartPy figure, under the samples
     if not pts:
         return False
@@ -691,7 +698,7 @@ def _wq_add_uncertainty(fig, pts, mode):
             c.set_zorder(max(c.get_zorder(), 3))
         xl, yl = ax.get_xlim(), ax.get_ylim()
         if mode == 'Clouds':
-            ax.scatter(g['x'], g['y'], s=1.2, color=UNC_COLOUR, lw=0, zorder=2.5)
+            ax.scatter(g['x'], g['y'], s=1.2, color=colour, lw=0, zorder=2.5)
             drawn = True
         else:
             xlog, ylog = ax.get_xscale() == 'log', ax.get_yscale() == 'log'
@@ -709,14 +716,18 @@ def _wq_add_uncertainty(fig, pts, mode):
                     continue
                 lx = 10 ** line[:, 0] if xlog else line[:, 0]
                 ly = 10 ** line[:, 1] if ylog else line[:, 1]
-                ax.plot(lx, ly, color=UNC_COLOUR, lw=UNC_LW + 0.1, zorder=2.5)
+                ax.plot(lx, ly, color=colour, lw=UNC_LW + 0.1, zorder=2.5)
                 drawn = True
             if stray:
                 st_ = pd.concat(stray)
-                ax.scatter(st_['x'], st_['y'], s=1.2, color=UNC_COLOUR, lw=0, zorder=2.5)
+                ax.scatter(st_['x'], st_['y'], s=1.2, color=colour, lw=0, zorder=2.5)
         ax.set_xlim(xl)
         ax.set_ylim(yl)
-    if drawn:
+    if drawn and kind == 'HFE-D':
+        h = (Line2D([], [], ls='', marker='o', ms=2, mfc=colour, mec='none') if mode == 'Clouds'
+             else Line2D([], [], color=colour, lw=1.0))
+        _hfed_legend(fig, (h, 'Monte Carlo realisations' if mode == 'Clouds' else 'Central 90 % of realisations'))
+    elif drawn:
         # a small legend entry just under WQChartPy's own legend (which is left as it is)
         for ax in fig.axes:
             leg = ax.get_legend()
@@ -725,14 +736,37 @@ def _wq_add_uncertainty(fig, pts, mode):
             fig.canvas.draw()
             box = leg.get_window_extent().transformed(fig.transFigure.inverted())
             size = leg.get_texts()[0].get_fontsize() if leg.get_texts() else 10
-            h = (Line2D([], [], ls='', marker='o', ms=2, mfc=UNC_COLOUR, mec='none') if mode == 'Clouds'
-                 else Line2D([], [], color=UNC_COLOUR, lw=1.0))
+            h = (Line2D([], [], ls='', marker='o', ms=2, mfc=colour, mec='none') if mode == 'Clouds'
+                 else Line2D([], [], color=colour, lw=1.0))
             ax.add_artist(leg)
             ax.legend([h], ['Monte Carlo realisations' if mode == 'Clouds' else 'Central 90 % of realisations'],
                       loc='upper left', bbox_to_anchor=(box.x0, box.y0), bbox_transform=fig.transFigure,
                       frameon=False, fontsize=size, borderaxespad=0)
             break
     return drawn
+
+
+def _hfed_legend(fig, extra=None):
+    # WQChartPy puts the HFE-D legend over the top of the diagram. Move it (with the
+    # uncertainty entry, if any) under the list of hydrochemical facies on the right
+    ax = next((a for a in fig.axes if a.get_legend() is not None), None)
+    if ax is None:
+        return
+    leg = ax.get_legend()
+    handles, labels = list(leg.legend_handles), [t.get_text() for t in leg.get_texts()]
+    if extra is not None:
+        handles.append(extra[0])
+        labels.append(extra[1])
+    fig.canvas.draw()
+    last = [t for t in fig.findobj(matplotlib.text.Text) if t.get_text().startswith('16:')]
+    leg.remove()
+    if last:
+        box = last[0].get_window_extent().transformed(fig.transFigure.inverted())
+        ax.legend(handles, labels, loc='upper left', bbox_to_anchor=(box.x0, box.y0 - 0.04),
+                  bbox_transform=fig.transFigure, frameon=False, fontsize=12, borderaxespad=0,
+                  handletextpad=0.4, markerscale=1.4)
+    else:
+        ax.legend(handles, labels, loc='upper left', bbox_to_anchor=(1.02, 0.3), frameon=False, fontsize=12)
 
 
 def wqchartpy_figure(v, kind, letters=None, letters_pos=PANEL_LABEL_POS[0], unc=None, unc_mode='Clouds'):
@@ -787,8 +821,13 @@ def wqchartpy_figure(v, kind, letters=None, letters_pos=PANEL_LABEL_POS[0], unc=
         t.set_fontfamily(FONT)
     matplotlib.rcdefaults()
     matplotlib.rcParams['mathtext.default'] = 'regular'
-    if unc is not None and unc_mode != 'Off' and not _wq_add_uncertainty(fig, pts, unc_mode):
-        note = (note + ' ' if note else '') + 'The uncertainty could not be drawn on this diagram.'
+    drawn = False
+    if unc is not None and unc_mode != 'Off':
+        drawn = _wq_add_uncertainty(fig, pts, unc_mode, colour=unc_colour(unc), kind=kind)
+        if not drawn:
+            note = (note + ' ' if note else '') + 'The uncertainty could not be drawn on this diagram.'
+    if kind == 'HFE-D' and not drawn:
+        _hfed_legend(fig)
     # panel letters for the diagrams with more than one panel (the Gibbs pair)
     if len(fig.axes) > 1:
         panel_letters(fig.axes, letters, letters_pos, outside_only=True)
@@ -1018,7 +1057,7 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None):
     mappable = _scatter(ax, v, x, y, hollow, styles, cvals=cvals, legend=False)
     xlo, xhi = _unc_cols(unc, v, panel['x'])
     ylo, yhi = _unc_cols(unc, v, panel['y'])
-    has_unc = _interval_lines(ax, x, y, xlo, xhi, ylo, yhi, xlog=xlog, ylog=ylog)
+    has_unc = _interval_lines(ax, x, y, xlo, xhi, ylo, yhi, xlog=xlog, ylog=ylog, colour=unc_colour(unc))
 
     ok = x.notna() & y.notna()
     if xlog:
@@ -1166,7 +1205,7 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
         else:
             handles = _legend_handles(styles, any_hollow)
         if any_unc:
-            handles.append(_unc_handle())
+            handles.append(_unc_handle(colour=unc_colour(unc)))
         fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.0),
                    ncol=min(4, len(handles)), frameon=False)
     return fig
@@ -1203,7 +1242,7 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
         else:
             handles = _legend_handles(styles, bool(hol.any()))
         if ax._has_unc:
-            handles.append(_unc_handle())
+            handles.append(_unc_handle(colour=unc_colour(unc)))
         fig.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(0.69, 0.96))
     return fig
 
@@ -1255,7 +1294,7 @@ def guideline_bars(v, var, lines, bar_colour=None, highlight=None, line_colour='
                 down = down.where(ulo > 0, 0)
             up = (uhi - val).clip(lower=0).fillna(0)
             if (down > 0).any() or (up > 0).any():
-                ax.errorbar(x, val, yerr=[down.to_numpy(), up.to_numpy()], fmt='none', ecolor=UNC_COLOUR,
+                ax.errorbar(x, val, yerr=[down.to_numpy(), up.to_numpy()], fmt='none', ecolor=unc_colour(unc),
                             elinewidth=UNC_LW + 0.3, capsize=2, capthick=UNC_LW + 0.3, zorder=2.8)
                 unc_drawn = True
         dashes = ['--', (0, (6, 2, 1, 2))]
@@ -1294,7 +1333,7 @@ def guideline_bars(v, var, lines, bar_colour=None, highlight=None, line_colour='
             handles.append(matplotlib.patches.Patch(facecolor='white', edgecolor=highlight, hatch='////',
                                                     lw=0.4, label='Outside the guideline'))
         if unc_drawn:
-            handles.append(_unc_handle())
+            handles.append(_unc_handle(colour=unc_colour(unc)))
         if handles:
             ax.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(1.01, 1.0),
                       fontsize=7)

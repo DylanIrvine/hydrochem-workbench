@@ -95,9 +95,9 @@ def test_app_runs_on_example_data(tmp_path, monkeypatch):
     [b for b in at.button if b.label == 'Build a zip of every figure'][0].click().run()
     assert not at.exception
     names = at.session_state['zip_contents']
-    for want in ['piper.png', 'classical/schoeller.png', 'classical/stiff_1.png', 'classical/durov.png',
-                 'classical/gibbs.png', 'classical/chadha.png', 'classical/hfe-d.png', 'custom_plot.png',
-                 'guideline_bar_chart.png']:
+    for want in ['classical/piper.png', 'classical/schoeller.png', 'classical/stiff_1.png', 'classical/durov.png',
+                 'classical/gibbs.png', 'classical/chadha.png', 'classical/hfe-d.png', 'custom plots/custom_plot.png',
+                 'custom plots/guideline_bar_chart.png']:
         assert want in names, want
     assert sum(n.startswith('gallery/') for n in names) >= len(plots_gallery_sets())
     # should still be 1
@@ -175,6 +175,8 @@ def test_app_with_uncertainty(tmp_path, monkeypatch):
     assert not at.exception
     # the table and the explanations only when asked for
     assert not any(e.label.startswith('**How the default') for e in at.expander)
+    at.color_picker(key='opt_unc_colour').pick('#aa0000').run()
+    assert not at.exception
     at.checkbox(key='opt_unc_show').check().run()
     assert not at.exception
     labels = [e.label for e in at.expander]
