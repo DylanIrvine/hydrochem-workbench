@@ -33,6 +33,9 @@ INTERVAL = '90 %'
 DEFAULT_N = 200
 SEED = 20261118
 
+# realisations kept whole (not just the interval) for the WQChartPy diagrams
+REAL_COLS = ['pH', 'TDS (mg/L)'] + [f'{a} (mg/L)' for a in ['Ca', 'Mg', 'Na', 'K', 'HCO3', 'CO3', 'Cl', 'SO4']]
+
 TABLE_COLS = ['Variable', 'LOR', 'Relative SD (%)', 'Absolute SD', 'Source']
 LOR_NOTE = ('LOR in mg/L as on the lab report: NO3 and NH4 as N, PO4 as P, alkalinity as CaCO3, '
             'DIC as C. EC in uS/cm. Relative and absolute SD are 1 standard deviation.')
@@ -216,7 +219,9 @@ def run(df, below, table, settings, pp, n=DEFAULT_N, seed=SEED, progress=None):
     hi = pd.DataFrame(hi, index=df.index, columns=cols)
     piper = {c: pd.DataFrame(arr[:, :, cols.index(c)].T, index=df.index)
              for c in cols if c.startswith('piper_')}
-    return dict(lo=lo, hi=hi, piper=piper, n=n, seed=seed, fails=n_fail,
+    # every realisation of the inputs to the WQChartPy diagrams
+    real = {c: pd.DataFrame(arr[:, :, cols.index(c)].T, index=df.index) for c in REAL_COLS if c in cols}
+    return dict(lo=lo, hi=hi, piper=piper, real=real, n=n, seed=seed, fails=n_fail,
                 wtype=np.stack(wtype), chadha=np.stack(chadha),
                 si=pd.DataFrame({c: (arr[:, :, cols.index(c)] > 0).mean(axis=0)
                                  for c in cols if c.startswith('SI ')}, index=df.index),

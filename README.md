@@ -69,8 +69,11 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    realisation goes through the same unit conversion, fills, PHREEQC and derived
    variables as the measured data. Results are 90 % intervals (5th to 95th
    percentile), drawn as light grey lines on the gallery, custom, Schoeller and
-   guideline bar plots, and as grey clouds or outlines (or off) on the Piper; the
-   points stay at the measured values. A per-sample summary gives the share of
+   guideline bar plots, and as grey clouds or outlines (or off) on the Piper and
+   the WQChartPy diagrams (Durov, Gibbs, Chadha, HFE-D); the points stay at the
+   measured values. For the WQChartPy diagrams, WQChartPy is run once on the
+   realisations with matplotlib's scatter swapped for a recorder, so the
+   realisations land exactly where WQChartPy would put them. A per-sample summary gives the share of
    realisations with the same water type and Chadha field, a charge balance
    within 5 % and each saturation index above zero. Every input (LOR, relative
    and absolute SD) is editable in the app. Defaults: major ions, alkalinity,

@@ -187,3 +187,18 @@ def test_app_with_uncertainty(tmp_path, monkeypatch):
     assert not at.exception
     at.checkbox(key='opt_unc').check().run()
     assert not at.exception
+
+
+def test_wqchartpy_uncertainty(tmp_path, monkeypatch):
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    at = AppTest.from_file(APP, default_timeout=300)
+    at.run()
+    at.checkbox(key='opt_example').check().run()
+    at.checkbox(key='opt_unc').check().run()
+    at.number_input(key='opt_unc_n').set_value(20).run()
+    at.radio(key='opt_view').set_value('Classical diagrams').run()
+    for diagram in ['Durov', 'Gibbs', 'Chadha', 'HFE-D']:
+        [s for s in at.selectbox if s.label == 'Diagram'][0].select(diagram).run()
+        for mode in ['Outlines', 'Off', 'Clouds']:
+            at.radio(key='opt_wq_unc').set_value(mode).run()
+            assert not at.exception

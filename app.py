@@ -747,9 +747,16 @@ if view == 'Classical diagrams':
             show(fig, 'stiff', 'dl_stiff')
     else:
         st.caption('Drawn by WQChartPy (Yang et al., 2022, Groundwater) in its own style. '
-                   'Not yet restyled to match the rest of the app.' +
-                   (' Uncertainty is not drawn on these diagrams.' if mc is not None else ''))
-        fig, note = plots.wqchartpy_figure(vp, kind, letters=letters, letters_pos=letters_pos)
+                   'Not yet restyled to match the rest of the app.')
+        wq_unc = 'Off'
+        if mc is not None:
+            wq_unc = st.radio('Uncertainty on this diagram', plots.PIPER_UNC_MODES, horizontal=True,
+                              key=opt('opt_wq_unc', 'Clouds', plots.PIPER_UNC_MODES),
+                              help='Clouds: every realisation as a small grey dot. Outlines: a line round the '
+                                   'central 90 % of each sample\'s realisations. Applies to the Durov, Gibbs, '
+                                   'Chadha and HFE-D diagrams.')
+        fig, note = plots.wqchartpy_figure(vp, kind, letters=letters, letters_pos=letters_pos, unc=mc,
+                                           unc_mode=wq_unc)
         if note:
             st.warning(note)
         if fig is None:
@@ -757,6 +764,10 @@ if view == 'Classical diagrams':
         else:
             show(fig, kind.lower(), 'dl_wq')
             plt.close(fig)
+            if mc is not None and wq_unc != 'Off' and kind == 'HFE-D':
+                st.caption('The HFE-D position jumps when the dominant ion changes, so realisations of a '
+                           'sample near a boundary can land in another field, away from the sample. '
+                           'Those are drawn as dots in both modes: the sample\'s facies is uncertain.')
         if kind == 'Chadha':
             st.markdown(
                 'The axes are differences in milliequivalent percentages: (Ca + Mg) less (Na + K) as a '
@@ -867,6 +878,7 @@ if view == 'Export':
         ('Uncertainty', 'Method', U.method_text(mc['n'], mc['seed']) if mc is not None else ''),
         ('Uncertainty', 'Inputs', 'See the Uncertainty inputs sheet' if mc is not None else ''),
         ('Uncertainty', 'Piper display', ss.get('opt_piper_unc', 'Clouds') if mc is not None else ''),
+        ('Uncertainty', 'Durov, Gibbs, Chadha, HFE-D display', ss.get('opt_wq_unc', 'Clouds') if mc is not None else ''),
         ('Guidelines', 'Sets', guide_txt),
         ('Guidelines', 'Bar chart', f"{ss.get('opt_gchart_var', '')}: {ss.get('opt_gchart_rule', '')}"),
     ]
@@ -936,7 +948,8 @@ if view == 'Export':
                 add(f'classical/stiff_{k // MAX_STIFF + 1}.png',
                     plots.stiff(vp, samples[k:k + MAX_STIFF], letters=letters, letters_pos=letters_pos))
             for kind in plots.WQ_DIAGRAMS:
-                fig, note = plots.wqchartpy_figure(vp, kind, letters=letters, letters_pos=letters_pos)
+                fig, note = plots.wqchartpy_figure(vp, kind, letters=letters, letters_pos=letters_pos, unc=mc,
+                                                   unc_mode=ss.get('opt_wq_unc', 'Clouds'))
                 if note:
                     notes.append(f'{kind}: {note}')
                 add(f'classical/{kind.lower()}.png', fig)

@@ -208,8 +208,8 @@ def _legend_handles(styles, any_hollow):
 
 # %% uncertainty
 # light grey for every uncertainty mark (interval lines, Piper clouds and outlines)
-UNC_COLOUR = '0.75'
-UNC_LW = 0.6
+UNC_COLOUR = '0.4'
+UNC_LW = 0.7
 PIPER_UNC_MODES = ['Clouds', 'Outlines', 'Off']
 
 
@@ -559,8 +559,184 @@ def stiff(v, samples, ncols=4, letters=None, letters_pos=PANEL_LABEL_POS[0]):
 WQ_DIAGRAMS = {'Durov': 'durvo', 'Gibbs': 'gibbs', 'Chadha': 'chadha', 'HFE-D': 'hfed'}
 
 
-def wqchartpy_figure(v, kind, letters=None, letters_pos=PANEL_LABEL_POS[0]):
-    # Durov, Gibbs, Chadha, HFE-D from WQChartPy as is
+def _wq_frame(v, kind):
+    # the table WQChartPy wants (mg/L), with '_i' = row of v. Rows it cannot draw are dropped
+    w = pd.DataFrame({'_i': v.index})
+    w['pH'] = v['pH'].to_numpy()
+    for a in ['Ca', 'Mg', 'Na', 'K', 'HCO3', 'CO3', 'Cl', 'SO4']:
+        w[a] = v[f'{a} (mg/L)'].to_numpy()
+    w['CO3'] = w['CO3'].fillna(0)
+    w['K'] = w['K'].fillna(0)
+    w['TDS'] = v['TDS (mg/L)'].to_numpy()
+    w = w.dropna(subset=['pH', 'Ca', 'Mg', 'Na', 'HCO3', 'Cl', 'SO4', 'TDS'])
+    if kind == 'Durov':
+        w = w[w['TDS'] <= 4000]
+    return w.reset_index(drop=True)
+
+
+def _wq_realisation_points(w, kind, unc):
+    # where WQChartPy would put every realisation of every sample.
+    # WQChartPy draws one scatter call per row, so it is run once on the realisations
+    # with Axes.scatter swapped for a recorder. Each row gets a unique colour that
+    # encodes (sample, realisation); the recorder reads it back, with the order of the
+    # calls within a row (some diagrams draw a sample in several places).
+    # returns [(axes number, sample row in w, call number in the row, x, y), ...]
+    import importlib
+    import matplotlib.axes
+    import matplotlib.pyplot as plt
+
+    real = unc.get('real') or {}
+    if not real:
+        return []
+    n = unc['n']
+    rows = []
+    for k, i in enumerate(w['_i']):
+        r = pd.DataFrame({'pH': real['pH'].loc[i].to_numpy(), 'TDS': real['TDS (mg/L)'].loc[i].to_numpy()})
+        for a in ['Ca', 'Mg', 'Na', 'K', 'HCO3', 'CO3', 'Cl', 'SO4']:
+            r[a] = real[f'{a} (mg/L)'].loc[i].to_numpy()
+        r['_row'] = k * n + np.arange(n) + 1
+        rows.append(r)
+    d = pd.concat(rows, ignore_index=True)
+    d['CO3'] = d['CO3'].fillna(0)
+    d['K'] = d['K'].fillna(0)
+    d = d.dropna(subset=['pH', 'Ca', 'Mg', 'Na', 'HCO3', 'Cl', 'SO4', 'TDS'])
+    if kind == 'Durov':
+        d = d[d['TDS'] <= 4000]
+    if d.empty:
+        return []
+    d['Color'] = ['#%06x' % r for r in d['_row']]
+    if kind == 'Durov':
+        # the Durov pH axis runs between the whole pH units either side of the data. Keep
+        # the realisations inside the samples' range and put the samples in the run (not
+        # recorded), so both runs have the same pH axis
+        lo, hi = np.floor(w['pH'].min()), np.ceil(w['pH'].max())
+        d['pH'] = d['pH'].clip(lo, hi)
+        samples = w.drop(columns='_i').copy()
+        samples['Color'] = 'black'
+        d = pd.concat([d, samples], ignore_index=True)
+    d['Sample'] = ''
+    d['Label'] = ''
+    d['Marker'] = 'o'
+    d['Size'] = 1
+    d['Alpha'] = 1.0
+    d = d.reset_index(drop=True)
+
+    found = []
+    calls = {}
+    empty = {}
+    original = matplotlib.axes.Axes.scatter
+
+    def recorder(ax, x, y, *args, **kw):
+        col = kw.get('color', kw.get('c'))
+        if isinstance(col, str) and len(col) == 7 and col.startswith('#'):
+            rid = int(col[1:], 16)
+            j = calls.get(rid, 0)
+            calls[rid] = j + 1
+            found.append((ax, (rid - 1) // n, j, float(np.ravel(x)[0]), float(np.ravel(y)[0])))
+            # pyplot wants a collection that belongs to the axes back: one empty one per axes
+            if ax not in empty:
+                empty[ax] = original(ax, [], [])
+            return empty[ax]
+        return original(ax, x, y, *args, **kw)
+
+    module = importlib.import_module('wqchartpy.' + WQ_DIAGRAMS[kind])
+    before = set(plt.get_fignums())
+    matplotlib.axes.Axes.scatter = recorder
+    try:
+        import warnings
+        # the recording run has no labelled points, so WQChartPy's legend call warns
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()), \
+                warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            module.plot(d, unit='mg/L', figname=os.path.join(tmp, 'fig'), figformat='png')
+    finally:
+        matplotlib.axes.Axes.scatter = original
+        new = [f for f in plt.get_fignums() if f not in before]
+        axes = plt.figure(new[-1]).axes if new else []
+        for f in new:
+            plt.close(f)
+    return [(axes.index(ax), k, j, x, y) for ax, k, j, x, y in found if ax in axes]
+
+
+def _far_from_cluster(x, y, k=8.0):
+    # True for points far from the median, in units of the median absolute deviation
+    # (with a floor, so a tight cluster does not flag everything)
+    out = np.zeros(len(x), dtype=bool)
+    ok = np.isfinite(x) & np.isfinite(y)
+    if ok.sum() < 5:
+        return ~ok
+    d = np.zeros(len(x))
+    for z in (x, y):
+        med = np.median(z[ok])
+        mad = np.median(np.abs(z[ok] - med))
+        span = np.ptp(z[ok])
+        d = np.maximum(d, np.abs(z - med) / max(mad, 0.01 * span, 1e-9))
+    out[ok] = d[ok] > k
+    return out | ~ok
+
+
+def _wq_add_uncertainty(fig, pts, mode):
+    # draw the recorded realisations on the WQChartPy figure, under the samples
+    if not pts:
+        return False
+    p = pd.DataFrame(pts, columns=['ax', 'k', 'j', 'x', 'y'])
+    p = p[np.isfinite(p['x']) & np.isfinite(p['y'])]
+    drawn = False
+    for a, g in p.groupby('ax'):
+        if a >= len(fig.axes):
+            continue
+        ax = fig.axes[a]
+        # samples above the realisations
+        for c in ax.collections:
+            c.set_zorder(max(c.get_zorder(), 3))
+        xl, yl = ax.get_xlim(), ax.get_ylim()
+        if mode == 'Clouds':
+            ax.scatter(g['x'], g['y'], s=1.2, color=UNC_COLOUR, lw=0, zorder=2.5)
+            drawn = True
+        else:
+            xlog, ylog = ax.get_xscale() == 'log', ax.get_yscale() == 'log'
+            stray = []
+            for _, h in g.groupby(['k', 'j']):
+                hx = (np.log10(h['x'].where(h['x'] > 0)) if xlog else h['x']).to_numpy(dtype=float)
+                hy = (np.log10(h['y'].where(h['y'] > 0)) if ylog else h['y']).to_numpy(dtype=float)
+                # some diagrams (HFE-D) jump when the dominant ion changes. Realisations far
+                # from the sample's main cluster are drawn as dots, not inside its outline
+                far = _far_from_cluster(hx, hy)
+                if far.any():
+                    stray.append(h[far])
+                line = central_outline(hx[~far], hy[~far])
+                if line is None:
+                    continue
+                lx = 10 ** line[:, 0] if xlog else line[:, 0]
+                ly = 10 ** line[:, 1] if ylog else line[:, 1]
+                ax.plot(lx, ly, color=UNC_COLOUR, lw=UNC_LW + 0.1, zorder=2.5)
+                drawn = True
+            if stray:
+                st_ = pd.concat(stray)
+                ax.scatter(st_['x'], st_['y'], s=1.2, color=UNC_COLOUR, lw=0, zorder=2.5)
+        ax.set_xlim(xl)
+        ax.set_ylim(yl)
+    if drawn:
+        # a small legend entry just under WQChartPy's own legend (which is left as it is)
+        for ax in fig.axes:
+            leg = ax.get_legend()
+            if leg is None:
+                continue
+            fig.canvas.draw()
+            box = leg.get_window_extent().transformed(fig.transFigure.inverted())
+            size = leg.get_texts()[0].get_fontsize() if leg.get_texts() else 10
+            h = (Line2D([], [], ls='', marker='o', ms=2, mfc=UNC_COLOUR, mec='none') if mode == 'Clouds'
+                 else Line2D([], [], color=UNC_COLOUR, lw=1.0))
+            ax.add_artist(leg)
+            ax.legend([h], ['Monte Carlo realisations' if mode == 'Clouds' else 'Central 90 % of realisations'],
+                      loc='upper left', bbox_to_anchor=(box.x0, box.y0), bbox_transform=fig.transFigure,
+                      frameon=False, fontsize=size, borderaxespad=0)
+            break
+    return drawn
+
+
+def wqchartpy_figure(v, kind, letters=None, letters_pos=PANEL_LABEL_POS[0], unc=None, unc_mode='Clouds'):
+    # Durov, Gibbs, Chadha, HFE-D from WQChartPy as is, with the uncertainty added
     # WQChartPy saves a file itself, so send that to a temp folder and keep the figure
     import importlib
     import matplotlib.pyplot as plt
@@ -587,6 +763,9 @@ def wqchartpy_figure(v, kind, letters=None, letters_pos=PANEL_LABEL_POS[0]):
             w = w[~over].reset_index(drop=True)
     if w.empty:
         return None, note
+    pts = []
+    if unc is not None and unc_mode != 'Off':
+        pts = _wq_realisation_points(_wq_frame(v, kind), kind, unc)
 
     module = importlib.import_module('wqchartpy.' + WQ_DIAGRAMS[kind])
     before = set(plt.get_fignums())
@@ -608,6 +787,7 @@ def wqchartpy_figure(v, kind, letters=None, letters_pos=PANEL_LABEL_POS[0]):
         t.set_fontfamily(FONT)
     matplotlib.rcdefaults()
     matplotlib.rcParams['mathtext.default'] = 'regular'
+    _wq_add_uncertainty(fig, pts, unc_mode)
     # panel letters for the diagrams with more than one panel (the Gibbs pair)
     if len(fig.axes) > 1:
         panel_letters(fig.axes, letters, letters_pos, outside_only=True)

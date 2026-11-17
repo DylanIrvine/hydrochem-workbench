@@ -142,3 +142,27 @@ def test_outline_and_hull():
     pts = np.column_stack([rng.normal(0, 1, 2000), rng.normal(0, 1, 2000)])
     assert 0.8 < p.contains_points(pts).mean() < 0.97
     assert plots.central_outline(np.ones(10), np.ones(10)) is None
+
+
+def test_wqchartpy_realisations_match_samples(pp):
+    # with no uncertainty every realisation lands on its sample, in every diagram
+    from core import plots
+    df, _, settings = _setup()
+    t = U.default_table()
+    t[['LOR', 'Relative SD (%)', 'Absolute SD']] = 0.0
+    v, _ = chem.derive(df, pp, **settings)
+    mc = U.run(df, {}, t, settings, pp, n=3)
+    v = v.copy()
+    st_ = plots.group_styles(v)
+    v['Color'] = v['Label'].map(lambda l: st_[l][0])
+    v['Marker'] = v['Label'].map(lambda l: st_[l][1])
+    for kind in plots.WQ_DIAGRAMS:
+        w = plots._wq_frame(v, kind)
+        pts = pd.DataFrame(plots._wq_realisation_points(w, kind, mc), columns=['ax', 'k', 'j', 'x', 'y'])
+        assert len(pts) > 0
+        # every realisation of a sample is at one point
+        spread = pts.groupby(['ax', 'k', 'j'])[['x', 'y']].agg(np.ptp)
+        assert (spread.to_numpy() < 1e-9).all(), kind
+    # recorder put back
+    import matplotlib.axes
+    assert matplotlib.axes.Axes.scatter.__name__ == 'scatter'
