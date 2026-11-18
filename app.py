@@ -52,7 +52,7 @@ DEFAULT_ALK = 100.0   # mg/L as CaCO3
 MAX_STIFF = 24
 
 # theme (dark, red) is set in .streamlit/config.toml
-st.set_page_config(page_title=APP_NAME, page_icon='logo/favicon.png', layout='centered')
+st.set_page_config(page_title=APP_NAME, page_icon='logo/HydroCHEM_icon.png', layout='centered')
 
 # %% settings that survive
 # Streamlit drops the value of any widget that is not drawn on a run (another view,
@@ -88,7 +88,7 @@ with head_text:
     st.write('Dylan Irvine, Charles Darwin University.')
     st.caption(f'Version {APP_VERSION}')
 with head_logo:
-    st.image('logo/hydrochem_badge.png', width='stretch')
+    st.image('logo/HydroCHEM_logo.png', width='stretch')
 
 # %% intro
 st.write(

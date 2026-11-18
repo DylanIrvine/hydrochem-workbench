@@ -119,7 +119,7 @@ usage statistics.
     core/uncertainty.py  Monte Carlo uncertainty analysis and its default inputs
     core/usage.py     the usage counter
     packages.txt      system font for Streamlit Cloud (Liberation Sans)
-    logo/             hex badge (svg, png) and favicon
+    logo/             header logo, browser-tab icon and svg source
     tests/            pytest: chemistry checks and a headless run of the app
 
 `core/` has no Streamlit in it and can be used from Spyder directly.
