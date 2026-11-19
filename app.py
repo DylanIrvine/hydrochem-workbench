@@ -512,6 +512,12 @@ if n_filled:
 if errors is not None and len(errors):
     st.warning(f'PHREEQC did not converge for {len(errors)} sample(s); see the Data tab.')
 
+# %% plotting and analysis: everything below works on the loaded dataset
+st.divider()
+st.header('Plotting and analysis')
+st.write('Set the colour and marker of each group and choose which groups to plot. The plot options '
+         '(log axes, panel letters, group means) are in the sidebar.')
+
 # %% groups: colour, marker, show or hide
 # defaults come from the palette, or the Color/Marker columns in the file
 labels = list(pd.unique(v['Label']))
@@ -593,6 +599,8 @@ vp = v[v['Label'].isin(shown)]
 
 numeric_choices = chem.plottable(v)
 color_opts = ['Group (Label)'] + numeric_choices
+st.subheader('Checks, plots and analyses')
+st.caption('Choose a view. Each one uses the groups ticked above.')
 # radio buttons and not st.tabs, as tabs redraw every figure on every click
 VIEWS = ['Data and checks', 'Guidelines', 'Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot',
          'Mixing', 'PCA', 'Clusters', 'Group comparison', 'Export']
