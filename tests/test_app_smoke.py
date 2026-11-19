@@ -215,3 +215,62 @@ def test_wqchartpy_uncertainty(tmp_path, monkeypatch):
         for mode in ['Outlines', 'Off', 'Clouds']:
             at.radio(key='opt_wq_unc').set_value(mode).run()
             assert not at.exception
+
+
+def test_further_analyses(tmp_path, monkeypatch):
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    at = AppTest.from_file(APP, default_timeout=300)
+    at.run()
+    at.checkbox(key='opt_example').check().run()
+    at.checkbox(key='opt_means').check().run()
+    for view in ['Mixing', 'PCA', 'Clusters', 'Group comparison']:
+        at.radio(key='opt_view').set_value(view).run()
+        assert not at.exception
+        assert not at.error
+    # three end members with two tracers, on log axes
+    at.radio(key='opt_view').set_value('Mixing').run()
+    at.radio(key='opt_mix_n').set_value(3).run()
+    assert any('at least 2 tracer' in e.value for e in at.error)
+    at.multiselect(key='opt_mix_tracers').set_value(['Cl (mmol/L)', 'Br (mmol/L)']).run()
+    at.checkbox(key='opt_mix_log').check().run()
+    assert not at.exception and not at.error
+    at.radio(key='opt_view').set_value('Export').run()
+    [b for b in at.button if 'zip of every figure' in b.label][0].click().run()
+    assert not at.exception
+    names = at.session_state['zip_contents']
+    for f in ['mixing_1.png', 'mixing_deviations.png', 'pca_biplot.png', 'cluster_dendrogram.png',
+              'group_boxplots_1.png']:
+        assert f'further analyses/{f}' in names
+
+
+def test_mixing_with_uncertainty(tmp_path, monkeypatch):
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    at = AppTest.from_file(APP, default_timeout=300)
+    at.run()
+    at.checkbox(key='opt_example').check().run()
+    at.checkbox(key='opt_unc').check().run()
+    at.number_input(key='opt_unc_n').set_value(20).run()
+    at.radio(key='opt_view').set_value('Mixing').run()
+    assert not at.exception and not at.error
+    assert any('differs from 0' in c.value for c in at.caption)
+
+
+def test_large_dataset_warning(tmp_path, monkeypatch):
+    import numpy as np
+    import pandas as pd
+    from core import chem
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    small = chem.example_data()
+    rng = np.random.default_rng(2)
+    big = pd.concat([small] * 10, ignore_index=True)
+    big['Sample'] = [f'X{k:03d}' for k in range(len(big))]
+    for c in ['Ca', 'Mg', 'Na', 'Cl']:
+        big[c] = pd.to_numeric(big[c], errors='coerce') * rng.uniform(0.9, 1.1, len(big))
+    monkeypatch.setattr(chem, 'example_data', lambda: big)
+    at = AppTest.from_file(APP, default_timeout=600)
+    at.run()
+    at.checkbox(key='opt_example').check().run()
+    assert any('Above 200 samples' in w.value for w in at.warning)
+    for view in ['Mixing', 'PCA', 'Clusters', 'Group comparison']:
+        at.radio(key='opt_view').set_value(view).run()
+        assert not at.exception

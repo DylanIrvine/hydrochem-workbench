@@ -276,7 +276,11 @@ def run(df, below, table, settings, pp, n=DEFAULT_N, seed=SEED, progress=None):
              for c in cols if c.startswith('piper_')}
     # every realisation of the inputs to the WQChartPy diagrams
     real = {c: pd.DataFrame(arr[:, :, cols.index(c)].T, index=df.index) for c in REAL_COLS if c in cols}
+    # every realisation of the concentrations (mmol/L) and any extra columns, for the mixing analysis
+    keep = [c for c in cols if c.endswith(' (mmol/L)') or c in settings.get('extra_cols', ())]
+    conc = {c: arr[:, :, cols.index(c)] for c in keep}
     return dict(lo=lo, hi=hi, piper=piper, real=real, n=n, seed=seed, fails=n_fail,
+                conc=conc, index=list(df.index),
                 wtype=np.stack(wtype), chadha=np.stack(chadha),
                 si=pd.DataFrame({c: (arr[:, :, cols.index(c)] > 0).mean(axis=0)
                                  for c in cols if c.startswith('SI ')}, index=df.index),

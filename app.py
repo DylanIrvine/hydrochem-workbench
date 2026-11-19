@@ -27,12 +27,12 @@ import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
 
 import core
-from core import chem, guidelines, plots, uncertainty, usage
+from core import chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced
 
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.11.1'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.13.0'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -40,10 +40,11 @@ APP_VERSION = '0.11.1'   # keep the same as VERSION in core/__init__.py
 if getattr(core, 'VERSION', None) != APP_VERSION:
     import importlib
     importlib.reload(core)
-    for _m in (chem, guidelines, plots, uncertainty, usage):
+    for _m in (chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced):
         importlib.reload(_m)
 
 _record_use, _usage_status = usage.increment, usage.status
+A, PA = advanced, plots_advanced
 
 PANELS_PER_PAGE = 6
 DEFAULT_PH = 7.0
@@ -85,7 +86,7 @@ head_text, head_logo = st.columns([3, 1], vertical_alignment='center')
 with head_text:
     st.title(APP_NAME)
     st.subheader('Hydrochemistry plots and PHREEQC saturation indices')
-    st.write('Dylan Irvine, Charles Darwin University.')
+    st.write('Dylan J. Irvine and Francesco Ulloa Cedamanos, Charles Darwin University.')
     st.caption(f'Version {APP_VERSION}')
 with head_logo:
     st.image('logo/HydroCHEM_logo.png', width='stretch')
@@ -202,7 +203,8 @@ with st.expander('**Privacy and data handling**'):
 with st.expander('**How to cite and references**'):
     st.markdown(
         '**This app**\n\n'
-        f'Irvine, D. (2026). Hydrochem Workbench (version {APP_VERSION}) [Web application]. '
+        f'Irvine, D.J. and Ulloa Cedamanos, F. (2026). Hydrochem Workbench (version {APP_VERSION}) '
+        '[Web application]. '
         f'Charles Darwin University. {APP_URL}\n\n'
         'Please also cite the software it is built on.\n\n'
         '**Geochemical calculations (PHREEQC)**\n\n'
@@ -261,6 +263,16 @@ with st.expander('**How to cite and references**'):
         'https://www.bipm.org/en/committees/cc/wg/jcgm\n\n'
         'JCGM (2008). Evaluation of measurement data: Guide to the expression of uncertainty in '
         'measurement. JCGM 100:2008. (Rectangular distributions for instrument specifications.)\n\n'
+        '**Further analyses**\n\n'
+        'Appelo, C.A.J. and Postma, D. (2005). Geochemistry, groundwater and pollution, 2nd edition. '
+        'A.A. Balkema, Leiden. (Mixing with conservative tracers and ion deviations; cation exchange.)\n\n'
+        'Aitchison, J. (1986). The statistical analysis of compositional data. Chapman and Hall, London. '
+        '(Centred log-ratio transform.)\n\n'
+        'Guler, C., Thyne, G.D., McCray, J.E. and Turner, A.K. (2002). Evaluation of graphical and '
+        'multivariate statistical methods for classification of water chemistry data. Hydrogeology '
+        'Journal, 10, 455-474. https://doi.org/10.1007/s10040-002-0196-6\n\n'
+        'Holm, S. (1979). A simple sequentially rejective multiple test procedure. Scandinavian Journal '
+        'of Statistics, 6(2), 65-70.\n\n'
         '**Other**\n\n'
         'Gimenez-Forcada, E. (2010). Dynamic of sea water interface using hydrochemical facies '
         'evolution diagram. Groundwater, 48(2), 212-216. '
@@ -414,6 +426,9 @@ with st.sidebar:
     st.header('5. Plot options')
     log_conc = st.checkbox('Log axes on concentration plots', key=opt('opt_log_conc', False),
                            help='Useful when fresh and saline samples share a plot.')
+    show_means = st.checkbox('Show group means as large markers', key=opt('opt_means', False),
+                             help='Adds the mean of each group to the Piper, gallery and custom plots, as a '
+                                  'larger version of the group marker. The means are listed on the Data tab.')
     letters = st.selectbox('Panel letters (multipanel figures)', ['None'] + list(plots.PANEL_LABELS),
                            key=opt('opt_letters', 'None', ['None'] + list(plots.PANEL_LABELS)),
                            help='For every figure with more than one panel: the gallery pages, the Stiff '
@@ -485,6 +500,10 @@ if saline.any():
                ('...' if saline.sum() > 8 else '') + '). phreeqc.dat is a freshwater database; '
                'saturation indices for these samples are approximate and a Pitzer database would be '
                'the right tool.')
+if len(v) > A.LARGE_DATASET:
+    st.warning(f'{len(v)} samples. Above {A.LARGE_DATASET} samples the figures can be slow to draw, crowded, '
+               'or in the worst case fail to draw. Every figure is still available; the tables and the '
+               'results download are not affected. Unticking groups in the Groups panel makes the plots lighter.')
 n_filled = int((v['Filled'] != '').sum())
 if n_filled:
     st.info(f'{n_filled} sample(s) had a missing pH, temperature or alkalinity filled. They are hollow on '
@@ -576,7 +595,7 @@ numeric_choices = chem.plottable(v)
 color_opts = ['Group (Label)'] + numeric_choices
 # radio buttons and not st.tabs, as tabs redraw every figure on every click
 VIEWS = ['Data and checks', 'Guidelines', 'Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot',
-         'Export']
+         'Mixing', 'PCA', 'Clusters', 'Group comparison', 'Export']
 view = st.radio('View', VIEWS, horizontal=True, label_visibility='collapsed', key=opt('opt_view', VIEWS[0], VIEWS))
 
 # %% view: data
@@ -600,6 +619,17 @@ if view == 'Data and checks':
                'Saturation indices and pCO2 always come from the alkalinity (or DIC) and pH. '
                'CBE is signed: positive means excess cations. TDS is the measured value where '
                'given, otherwise the sum of ions with bicarbonate x 0.4917.')
+
+    st.subheader('Group means')
+    g_means, g_counts = chem.group_means(v)
+    st.dataframe(g_means.round(3), width='stretch', hide_index=True)
+    st.caption('Arithmetic mean of each analyte (mg/L) and TDS for each group, all groups included. '
+               'Values below the LOR count at their replaced value. Values that rest on a filled pH, '
+               'temperature or alkalinity (HCO3, CO3, and TDS where it was calculated) are left out, as they '
+               'are drawn hollow on the plots. Samples is the group size; the number of values behind each '
+               'mean is on the Group mean counts sheet of the results download. With "Show group means" '
+               'ticked, the large markers on the plots are the mean of whatever is on each axis, so on a '
+               'ratio plot the marker is the mean of the ratios, not the ratio of the mean concentrations.')
 
     if mc is not None:
         st.subheader('Uncertainty')
@@ -721,7 +751,8 @@ if view == 'Guidelines':
                            (' Samples with a value below zero or none are left out.' if g_log else ''))
 
 # %% plots need at least one group
-PLOT_VIEWS = ('Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot')
+PLOT_VIEWS = ('Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot', 'Mixing', 'PCA', 'Clusters',
+              'Group comparison')
 if view in PLOT_VIEWS and vp.empty:
     st.info('No groups are ticked to plot. Tick at least one in the Groups panel above.')
     st.stop()
@@ -739,7 +770,7 @@ if view == 'Piper':
                          help='Clouds: every realisation as a small grey dot. Outlines: a line round the '
                               'central 90 % of each sample\'s realisations. Off is cleaner for large datasets.')
     fig = plots.piper(vp, color_by=None if p_color.startswith('Group') else p_color,
-                      water_legend=p_legend, show_types=p_types, unc=mc, unc_mode=p_unc)
+                      water_legend=p_legend, show_types=p_types, unc=mc, unc_mode=p_unc, means=show_means)
     show(fig, 'piper', 'dl_piper')
     not_shown = int(vp['piper_d_x'].isna().sum())
     if not_shown:
@@ -818,7 +849,8 @@ if view == 'Diagnostic gallery':
     for k in range(0, len(panels), PANELS_PER_PAGE):
         fig = plots.gallery_page(vp, panels[k:k + PANELS_PER_PAGE], log_conc=log_conc,
                                  letters=letters, letters_pos=letters_pos,
-                                 color_by=None if g_color.startswith('Group') else g_color, unc=mc)
+                                 color_by=None if g_color.startswith('Group') else g_color, unc=mc,
+                                 means=show_means)
         show(fig, f'{group.lower().replace(" ", "_").replace("/", "-")}_{k // PANELS_PER_PAGE + 1}',
              f'dl_gallery_{k}')
     if skipped:
@@ -843,8 +875,276 @@ if view == 'Custom plot':
     zero = c4.checkbox('y = 0 line', key=opt('opt_custom_zero', False))
     ann = c5.checkbox('Label samples', key=opt('opt_custom_labels', False))
     fig = plots.custom(vp, cx, cy, xlog=xlog, ylog=ylog, one_to_one=one, zero_line=zero, annotate=ann,
-                       color_by=None if cc.startswith('Group') else cc, unc=mc)
+                       color_by=None if cc.startswith('Group') else cc, unc=mc, means=show_means)
     show(fig, 'custom_plot', 'dl_custom')
+
+
+# %% further analyses: shared choices
+# each analysis reads its settings from session_state, so the Export view can redo it with the
+# same choices for the download
+def mmol_choices(w):
+    return [A.mmol_col(a) for a in chem.ANALYTES if A.mmol_col(a) in w.columns and w[A.mmol_col(a)].notna().any()]
+
+
+def multi_defaults(w):
+    # majors that were measured, without those mostly below the LOR
+    share = A.lor_share(w, replaced)
+    return [A.mmol_col(a) for a in A.MULTI_MAJORS
+            if A.mmol_col(a) in mmol_choices(w) and share.get(a, 0) <= A.LOR_SHARE_WARN
+            and (w[A.mmol_col(a)] > 0).sum() >= 3]
+
+
+def multi_warnings(w, cols, n_used):
+    share = A.lor_share(w, replaced)
+    heavy = [A.analyte_of(c) for c in cols if share.get(A.analyte_of(c), 0) > A.LOR_SHARE_WARN]
+    if heavy:
+        st.warning('More than a quarter of the samples are below the LOR for ' + ', '.join(heavy) +
+                   '. Every replaced value is the same number, which adds structure that is not in the water. '
+                   'Consider leaving these out.')
+    if n_used < 10:
+        st.warning(f'Only {n_used} samples. With so few, the result can change a lot if one sample is added '
+                   'or removed; treat it as a description of these samples, not a general finding.')
+    elif n_used < 3 * len(cols):
+        st.warning(f'{n_used} samples for {len(cols)} variables. A common rule of thumb is at least three '
+                   'samples per variable; the components or clusters may not be stable.')
+
+
+ION_LABEL = lambda c: A.analyte_of(c) or c
+extra_numeric = [c for c in (base['settings']['extra_cols'] if base else []) if c in numeric_choices]
+mix_options = A.member_options(v)
+_groups = list(pd.unique(v['Label']))
+
+
+def _em_default(k):
+    return f'Group mean: {_groups[k]}' if len(_groups) > k else mix_options[min(k, len(mix_options) - 1)]
+
+
+def compute_mixing():
+    n_em = ss.get('opt_mix_n', 2)
+    choices = [ss.get(f'opt_mix_em{k}', _em_default(k)) for k in range(n_em)]
+    tracers = ss.get('opt_mix_tracers', ['Cl (mmol/L)'])
+    ions = ss.get('opt_mix_ions', [])
+    return A.run_mixing(v, vp, choices, tracers, ions, mc=mc)
+
+
+def mixing_panel_list(res):
+    t = res['tracers']
+    out = [(t[0], t[1])] if len(t) >= 2 else []
+    return out + [(t[0], c) for c in res['ions']]
+
+
+def compute_pca():
+    cols = ss.get('opt_pca_vars', multi_defaults(vp))
+    if len(cols) < 2:
+        raise ValueError('Choose at least two variables.')
+    X, dropped_s = A.prepare(vp, cols)
+    if len(X) < 3:
+        raise ValueError('Fewer than three samples have every chosen variable.')
+    return A.pca(X, ss.get('opt_pca_transform', A.TRANSFORMS[0])), X, dropped_s
+
+
+def compute_clusters():
+    cols = ss.get('opt_hca_vars', multi_defaults(vp))
+    if len(cols) < 2:
+        raise ValueError('Choose at least two variables.')
+    X, dropped_s = A.prepare(vp, cols)
+    k = int(ss.get('opt_hca_k', 3))
+    if len(X) <= k:
+        raise ValueError(f'{len(X)} samples have every chosen variable, too few for {k} clusters.')
+    return A.clusters(X, ss.get('opt_hca_transform', A.TRANSFORMS[1]), k), X, dropped_s
+
+
+CMP_DEFAULT = [f'{a} (mg/L)' for a in ['Ca', 'Mg', 'Na', 'K', 'HCO3', 'Cl', 'SO4']]
+
+# %% view: mixing
+if view == 'Mixing':
+    st.subheader('Mixing between end members')
+    st.write('Each sample is treated as a mix of two or three end members (for example rainfall, river water '
+             'and regional groundwater). The mixing fractions come from conservative tracers, ones not added '
+             'or taken away along the flow path (usually Cl, Br or the water isotopes). Every other ion is then '
+             'compared with what mixing alone would give. Measured minus mixing above zero means the ion was '
+             'gained (dissolution, exchange, oxidation); below zero means it was lost (precipitation, '
+             'exchange, uptake, reduction).')
+    n_em = st.radio('Number of end members', [2, 3], horizontal=True, key=opt('opt_mix_n', 2, [2, 3]))
+    cols_em = st.columns(n_em)
+    for k in range(n_em):
+        cols_em[k].selectbox(f'End member {k + 1} (EM{k + 1})', mix_options,
+                             key=opt(f'opt_mix_em{k}', _em_default(k), mix_options))
+    tr_opts = mmol_choices(v) + extra_numeric
+    tr_default = ['Cl (mmol/L)'] if 'Cl (mmol/L)' in tr_opts else tr_opts[:1]
+    if n_em == 3:
+        tr_default += [c for c in ['Br (mmol/L)'] + extra_numeric if c in tr_opts and c not in tr_default][:1]
+    st.multiselect('Conservative tracers', tr_opts, key=opt('opt_mix_tracers', tr_default, tr_opts),
+                   help=f'{n_em} end members need at least {n_em - 1} tracer(s). With more, the fractions are a '
+                        'least-squares fit, each tracer scaled by the spread of the end members so that units do '
+                        'not matter.')
+    ion_opts = [c for c in mmol_choices(v) if c not in ss.get('opt_mix_tracers', [])]
+    ion_default = [A.mmol_col(a) for a in ['Ca', 'Mg', 'Na', 'K', 'HCO3', 'SO4'] if A.mmol_col(a) in ion_opts]
+    st.multiselect('Ions to compare with mixing', ion_opts, key=opt('opt_mix_ions', ion_default, ion_opts))
+    c1, c2 = st.columns(2)
+    mix_log = c1.checkbox('Log axes on the mixing plots', key=opt('opt_mix_log', False))
+    dev_log = c2.checkbox('Symmetric log axis on the deviation plot', key=opt('opt_mix_symlog', False),
+                          help='Linear close to zero and logarithmic beyond, for data that spans fresh and saline water.')
+    try:
+        mix = compute_mixing()
+    except ValueError as err:
+        st.error(str(err))
+        mix = None
+    if mix is not None:
+        em = mix['members'].copy()
+        em.insert(0, 'Chosen as', [mix['member_choices'][n] for n in em.index])
+        st.dataframe(em.rename(columns=ION_LABEL).round(4), width='stretch')
+        st.caption('End-member compositions (mmol/L, extra columns in their own units). A group mean is the mean '
+                   'of that group\'s measured values.')
+        if mix.get('mc_note'):
+            st.info(mix['mc_note'])
+        n_out = int(mix['outside'].sum())
+        if n_out:
+            st.info(f'{n_out} sample(s) have a mixing fraction below 0 or above 1: they cannot be made by mixing '
+                    'these end members. Another source, an end member that is not quite right, or a tracer that '
+                    'is not conservative are the usual reasons. They are flagged in the table.')
+        pl = mixing_panel_list(mix)
+        for k in range(0, len(pl), PANELS_PER_PAGE):
+            show(PA.mixing_panels(vp, mix, pl[k:k + PANELS_PER_PAGE], log=mix_log, means=show_means,
+                                  letters=letters, letters_pos=letters_pos),
+                 f'mixing_{k // PANELS_PER_PAGE + 1}', f'dl_mix_{k}')
+        st.caption('Stars are the end members. Samples on the dashed line (two end members) or inside the dashed '
+                   'triangle (three) can be explained by mixing alone in that pair of variables; samples off it '
+                   'need a process or another source.')
+        fig = PA.deviation_plot(vp, mix, symlog=dev_log)
+        if fig is not None:
+            show(fig, 'mixing_deviations', 'dl_mix_dev')
+        fig = PA.exchange_plot(vp, mix)
+        if fig is not None:
+            show(fig, 'mixing_cation_exchange', 'dl_mix_exch')
+            st.caption('Cation exchange swaps Na + K for Ca + Mg charge for charge, so exchange alone puts samples '
+                       'on the 1:-1 line. Upper left: the water gained Na and lost Ca + Mg, as when fresh water '
+                       'flushes a formerly saline aquifer. Lower right: the reverse, as in salinisation.')
+        st.subheader('Mixing results')
+        st.dataframe(A.mixing_table(vp, mix).round(4), width='stretch', hide_index=True)
+        st.caption('Fractions are f EM1, f EM2 (and f EM3), summing to 1. Deviations (d) are measured minus '
+                   'conservative mixing, in mmol/L. Values that rest on a filled pH, temperature or alkalinity are '
+                   'left out. ' +
+                   ('With the uncertainty analysis on, each fraction and deviation has a 90 % interval from the '
+                    'realisations (end members drawn again in each one), and "differs from 0" marks deviations '
+                    'whose interval does not include zero. Extra columns such as isotopes have no uncertainty in '
+                    'the realisations. ' if 'dev_lo' in mix else
+                    'Tick "Include uncertainty analysis" in the sidebar to see which deviations are larger than '
+                    'the measurement uncertainty. ') +
+                   'The mixing method follows Appelo and Postma (2005), Geochemistry, Groundwater and Pollution.')
+
+# %% view: PCA
+if view == 'PCA':
+    st.subheader('Principal component analysis')
+    st.write('PCA finds the few directions (components) that carry most of the variation among the samples. '
+             'The biplot shows the samples on two components and each variable as an arrow: samples lie toward '
+             'the variables they are rich in, and arrows pointing the same way vary together.')
+    var_opts = mmol_choices(vp)
+    c1, c2 = st.columns([3, 2])
+    pca_vars = c1.multiselect('Variables', var_opts, key=opt('opt_pca_vars', multi_defaults(vp), var_opts),
+                              format_func=ION_LABEL)
+    c2.selectbox('Transform', A.TRANSFORMS, key=opt('opt_pca_transform', A.TRANSFORMS[0], A.TRANSFORMS),
+                 help='Centred log-ratio (clr): the standard for compositions, where every concentration is part '
+                      'of a whole (Aitchison 1986). log10, then standardised: each variable on a log scale with '
+                      'mean 0 and SD 1, so every variable counts equally.')
+    try:
+        pca, X_pca, dropped_s = compute_pca()
+    except ValueError as err:
+        st.error(str(err))
+        pca = None
+    if pca is not None:
+        multi_warnings(vp, pca_vars, len(X_pca))
+        if dropped_s:
+            st.info(f'{len(dropped_s)} sample(s) left out for a missing, zero or filled value in a chosen '
+                    'variable: ' + ', '.join(dropped_s[:12]) + (' ...' if len(dropped_s) > 12 else ''))
+        pcs = list(pca['explained'].index)
+        c1, c2 = st.columns(2)
+        a = c1.selectbox('x axis', pcs, key=opt('opt_pca_x', pcs[0], pcs))
+        b = c2.selectbox('y axis', pcs, key=opt('opt_pca_y', pcs[1], pcs))
+        show(PA.pca_biplot(vp, pca, a, b, means=show_means), 'pca_biplot', 'dl_pca')
+        ld = pca['loadings'].rename(index=ION_LABEL)
+        ld.loc['Variance explained (%)'] = 100 * pca['explained']
+        st.dataframe(ld.round(3), width='stretch')
+        st.caption('Loadings: how much each variable contributes to each component (the arrows on the biplot). '
+                   'The bar chart shows the share of the variance on each component. With clr the last component '
+                   'always carries no variance (the clr values of a sample sum to zero). PCA describes these '
+                   'samples; it does not test anything. Values that rest on a filled alkalinity, pH or '
+                   'temperature are left out.')
+
+# %% view: clusters
+if view == 'Clusters':
+    st.subheader('Hierarchical cluster analysis')
+    st.write('Groups the samples by chemical similarity alone, without your labels: Ward linkage on the Euclidean '
+             'distance between samples, the approach recommended for water chemistry by Guler et al. (2002, '
+             'Hydrogeology Journal 10, 455-474). The table compares the clusters with your groups.')
+    var_opts = mmol_choices(vp)
+    c1, c2, c3 = st.columns([3, 2, 1])
+    hca_vars = c1.multiselect('Variables', var_opts, key=opt('opt_hca_vars', multi_defaults(vp), var_opts),
+                              format_func=ION_LABEL)
+    c2.selectbox('Transform', A.TRANSFORMS, key=opt('opt_hca_transform', A.TRANSFORMS[1], A.TRANSFORMS))
+    c3.number_input('Clusters', min_value=2, max_value=10, step=1, key=opt('opt_hca_k', 3))
+    try:
+        hca, X_hca, dropped_s = compute_clusters()
+    except ValueError as err:
+        st.error(str(err))
+        hca = None
+    if hca is not None:
+        multi_warnings(vp, hca_vars, len(X_hca))
+        if dropped_s:
+            st.info(f'{len(dropped_s)} sample(s) left out for a missing, zero or filled value in a chosen '
+                    'variable: ' + ', '.join(dropped_s[:12]) + (' ...' if len(dropped_s) > 12 else ''))
+        show(PA.dendrogram_fig(vp, hca), 'cluster_dendrogram', 'dl_dend')
+        st.caption('Branches are coloured by cluster, and the dashed line is where the tree is cut. Sample names '
+                   'are in the colour of their group, so a cluster that mixes colours mixes your groups. A long '
+                   'vertical step just above the cut means well-separated clusters; short steps mean the number '
+                   'of clusters is a matter of choice.')
+        show(PA.cluster_piper(vp, hca['labels'], means=show_means), 'cluster_piper', 'dl_cpiper')
+        st.markdown('**Clusters against your groups** (number of samples)')
+        st.dataframe(A.crosstab(vp, hca['labels']), width='stretch')
+        mg = [c.replace('(mmol/L)', '(mg/L)') for c in hca_vars]
+        st.markdown('**Cluster means** (mg/L)')
+        st.dataframe(A.cluster_means(vp, hca['labels'], mg).rename(columns=lambda c: c.replace(' (mg/L)', '')).round(2),
+                     width='stretch')
+        st.caption('Clustering always returns clusters, whether or not the water falls into distinct types; '
+                   'check them against the dendrogram, the Piper and what you know of the site.')
+
+# %% view: group comparison
+if view == 'Group comparison':
+    st.subheader('Group comparison')
+    st.write('Box plots of each variable by group, with a Kruskal-Wallis test of whether the groups differ, and '
+             'Mann-Whitney U tests between each pair of groups. Both are rank-based, so they suit skewed '
+             'concentrations and small groups better than ANOVA and t-tests.')
+    cmp_opts = numeric_choices
+    c1, c2 = st.columns([4, 1])
+    cmp_vars = c1.multiselect('Variables', cmp_opts,
+                              key=opt('opt_cmp_vars', [c for c in CMP_DEFAULT if c in cmp_opts], cmp_opts))
+    cmp_log = c2.checkbox('Log axes', key=opt('opt_cmp_log', False))
+    if vp['Label'].nunique() < 2:
+        st.info('Tick at least two groups to compare.')
+    elif cmp_vars:
+        kw, pairs = A.group_tests(vp, cmp_vars)
+        for k in range(0, len(cmp_vars), PANELS_PER_PAGE):
+            show(PA.box_page(vp, cmp_vars[k:k + PANELS_PER_PAGE], kw, log=cmp_log, letters=letters,
+                             letters_pos=letters_pos), f'group_boxplots_{k // PANELS_PER_PAGE + 1}', f'dl_box_{k}')
+        st.caption('Boxes span the 25th to 75th percentile with the median as a line; whiskers reach the furthest '
+                   'sample within 1.5 times the box height. Every sample is drawn over its box.')
+        st.markdown('**Kruskal-Wallis tests**')
+        st.dataframe(kw.round(4), width='stretch', hide_index=True)
+        if len(pairs):
+            st.markdown('**Pairs of groups (Mann-Whitney U)**')
+            st.dataframe(pairs.round(4), width='stretch', hide_index=True)
+        st.caption(f'Groups with fewer than {A.MIN_PER_GROUP} values of a variable are left out of its tests. The '
+                   'pairwise p values are Holm-adjusted within each variable for the number of pairs, not across '
+                   'variables: with many variables, some small p values are expected by chance. Values that rest '
+                   'on a filled pH, temperature or alkalinity are left out.')
+        if st.checkbox('Correlation heat map of these variables', key=opt('opt_cmp_corr', True)):
+            r, n_pairs = A.spearman(vp, cmp_vars)
+            fig = PA.corr_heatmap(r, n_pairs)
+            if fig is not None:
+                show(fig, 'spearman_correlations', 'dl_corr')
+                st.caption('Spearman rank correlations across all plotted samples, each from the samples with both '
+                           'values (grey: fewer than 4). Correlation across groups often reflects the groups '
+                           'themselves (e.g. fresh against saline) rather than a process within any one of them.')
 
 # %% view: export
 if view == 'Export':
@@ -879,6 +1179,7 @@ if view == 'Export':
         ('Groups', 'Not plotted', ', '.join(l for l in labels if l not in shown) or 'None'),
         ('Groups', 'Colours and markers', 'See the Groups sheet'),
         ('Plots', 'Log axes on concentration plots', 'Yes' if log_conc else 'No'),
+        ('Plots', 'Group means as large markers', 'Yes' if show_means else 'No'),
         ('Plots', 'Panel letters', letters or 'None'),
         ('Plots', 'Panel letter position', letters_pos if letters else ''),
         ('Plots', 'Piper: colour by', ss.get('piper_color', 'Group (Label)')),
@@ -897,6 +1198,31 @@ if view == 'Export':
         ('Guidelines', 'Sets', guide_txt),
         ('Guidelines', 'Bar chart', f"{ss.get('opt_gchart_var', '')}: {ss.get('opt_gchart_rule', '')}"),
     ]
+    # the further analyses, each only if its view was opened (so its choices were made)
+    ran = {'Mixing': 'opt_mix_tracers' in ss, 'PCA': 'opt_pca_vars' in ss, 'Clusters': 'opt_hca_vars' in ss,
+           'Group comparison': 'opt_cmp_vars' in ss}
+    lab = lambda cols: ', '.join(ION_LABEL(c) for c in cols)
+    if ran['Mixing']:
+        n_em = ss.get('opt_mix_n', 2)
+        rows += [('Mixing', 'End members', '; '.join(f"EM{k + 1} = {ss.get(f'opt_mix_em{k}', _em_default(k))}"
+                                                      for k in range(n_em))),
+                 ('Mixing', 'Tracers', lab(ss.get('opt_mix_tracers', []))),
+                 ('Mixing', 'Ions compared', lab(ss.get('opt_mix_ions', [])))]
+    if ran['PCA']:
+        rows += [('PCA', 'Variables', lab(ss.get('opt_pca_vars', []))),
+                 ('PCA', 'Transform', ss.get('opt_pca_transform', A.TRANSFORMS[0]))]
+    if ran['Clusters']:
+        rows += [('Clusters', 'Variables', lab(ss.get('opt_hca_vars', []))),
+                 ('Clusters', 'Transform', ss.get('opt_hca_transform', A.TRANSFORMS[1])),
+                 ('Clusters', 'Method', 'Ward linkage, Euclidean distance'),
+                 ('Clusters', 'Number of clusters', ss.get('opt_hca_k', 3))]
+    if ran['Group comparison']:
+        rows += [('Group comparison', 'Variables', ', '.join(ss.get('opt_cmp_vars', []))),
+                 ('Group comparison', 'Tests', 'Kruskal-Wallis; pairwise Mann-Whitney U, Holm-adjusted within '
+                                               'each variable')]
+    for name, done in ran.items():
+        if not done:
+            rows.append((name, 'Included', 'No (view not opened)'))
     settings = pd.DataFrame(rows, columns=['Section', 'Setting', 'Value'])
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as xl:
@@ -906,6 +1232,9 @@ if view == 'Export':
                       'Colour': [group_style[lab][0] for lab in labels],
                       'Marker': [group_style[lab][1] for lab in labels]}).to_excel(
             xl, sheet_name='Groups', index=False)
+        g_means, g_counts = chem.group_means(v)
+        g_means.to_excel(xl, sheet_name='Group means', index=False)
+        g_counts.to_excel(xl, sheet_name='Group mean counts', index=False)
         if n_replaced:
             replaced.astype({'Value': str}).to_excel(xl, sheet_name='Below LOR replaced', index=False)
         if n_dropped:
@@ -918,6 +1247,41 @@ if view == 'Export':
             U.summary(v, mc).to_excel(xl, sheet_name='Uncertainty summary', index=False)
             U.interval_table(v, mc).to_excel(xl, sheet_name='Uncertainty intervals', index=False)
             unc_table.to_excel(xl, sheet_name='Uncertainty inputs', index=False)
+        if not vp.empty:
+            if ran['Mixing']:
+                try:
+                    mix = compute_mixing()
+                    A.mixing_table(vp, mix).to_excel(xl, sheet_name='Mixing', index=False)
+                    em = mix['members'].copy()
+                    em.insert(0, 'Chosen as', [mix['member_choices'][n] for n in em.index])
+                    em.to_excel(xl, sheet_name='Mixing end members')
+                except ValueError:
+                    pass
+            if ran['PCA']:
+                try:
+                    pca, X_pca, _ = compute_pca()
+                    sc = pca['scores'].copy()
+                    sc.insert(0, 'Label', vp.loc[sc.index, 'Label'])
+                    sc.insert(0, 'Sample', vp.loc[sc.index, 'Sample'])
+                    sc.to_excel(xl, sheet_name='PCA scores', index=False)
+                    ld = pca['loadings'].copy()
+                    ld.loc['Variance explained (%)'] = 100 * pca['explained']
+                    ld.to_excel(xl, sheet_name='PCA loadings')
+                except ValueError:
+                    pass
+            if ran['Clusters']:
+                try:
+                    hca, _, _ = compute_clusters()
+                    pd.DataFrame({'Sample': vp.loc[hca['labels'].index, 'Sample'],
+                                  'Label': vp.loc[hca['labels'].index, 'Label'],
+                                  'Cluster': hca['labels']}).to_excel(xl, sheet_name='Clusters', index=False)
+                    A.crosstab(vp, hca['labels']).to_excel(xl, sheet_name='Clusters vs groups')
+                except ValueError:
+                    pass
+            if ran['Group comparison'] and ss.get('opt_cmp_vars') and vp['Label'].nunique() >= 2:
+                kw, pairs = A.group_tests(vp, ss['opt_cmp_vars'])
+                kw.to_excel(xl, sheet_name='Group tests', index=False)
+                pairs.to_excel(xl, sheet_name='Group tests pairwise', index=False)
     stem = os.path.splitext(data_name)[0].replace(' ', '_') if not use_example else 'example'
     st.download_button('Download results (.xlsx)', buf.getvalue(), file_name=f'{stem}_hydrochem_results.xlsx',
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -925,13 +1289,18 @@ if view == 'Export':
                'groups not plotted). The Settings sheet records every option used (units, below-LOR, '
                'missing values, groups, plot options, guidelines), with the group colours and markers '
                'and any replaced below-LOR values on their own sheets, so the run can be reproduced. '
+               'The Group means sheet has the mean of each analyte for each group, and Group mean counts '
+               'the number of values behind each mean. '
                'With the uncertainty analysis on, three more sheets: the inputs used, the 5th and 95th '
                'percentiles beside every derived variable, and a per-sample summary (probability of the '
                'same water type, Chadha field, charge balance within 5 % and each SI above zero). '
+               'Mixing, PCA, Clusters and Group comparison add their own sheets once their view has been '
+               'opened, with the choices made there. '
                'The figure zip has every figure the app draws, for the plotted groups only and with the '
-               'options chosen on each view, in three folders: classical (Piper, Schoeller, Stiff, Durov, '
-               'Gibbs, Chadha, HFE-D), gallery, and custom plots (the custom plot and the guideline bar '
-               'chart). File names start with the dataset name.')
+               'options chosen on each view, in folders: classical (Piper, Schoeller, Stiff, Durov, '
+               'Gibbs, Chadha, HFE-D), gallery, custom plots (the custom plot and the guideline bar '
+               'chart) and further analyses (from the views that have been opened). File names start with '
+               'the dataset name.')
 
     st.subheader('All figures')
     dpi = st.selectbox('Resolution', [300, 600], key=opt('opt_dpi', 300, [300, 600]))
@@ -956,7 +1325,7 @@ if view == 'Export':
             add('classical/piper.png', plots.piper(vp, color_by=by('piper_color'),
                                          water_legend=ss.get('opt_piper_legend', False),
                                          show_types=ss.get('opt_piper_types', True),
-                                         unc=mc, unc_mode=ss.get('opt_piper_unc', 'Clouds')))
+                                         unc=mc, unc_mode=ss.get('opt_piper_unc', 'Clouds'), means=show_means))
             add('classical/schoeller.png', plots.schoeller(vp, unc=mc))
             # Stiff: every plotted sample, MAX_STIFF to a page
             samples = list(vp['Sample'])
@@ -974,7 +1343,7 @@ if view == 'Export':
                 for k in range(0, len(gp), PANELS_PER_PAGE):
                     f = plots.gallery_page(vp, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc,
                                           color_by=by('gallery_color'), letters=letters, letters_pos=letters_pos,
-                                          unc=mc)
+                                          unc=mc, means=show_means)
                     fname = gname.lower().replace(' ', '_').replace('/', '-')
                     add(f'gallery/{fname}_{k // PANELS_PER_PAGE + 1}.png', f)
             # custom plot, as last set on its view
@@ -985,7 +1354,8 @@ if view == 'Export':
                 add('custom plots/custom_plot.png', plots.custom(
                     vp, cx, cy, xlog=ss.get('opt_custom_xlog', False), ylog=ss.get('opt_custom_ylog', False),
                     one_to_one=ss.get('opt_custom_one', False), zero_line=ss.get('opt_custom_zero', False),
-                    annotate=ss.get('opt_custom_labels', False), color_by=by('custom_color'), unc=mc))
+                    annotate=ss.get('opt_custom_labels', False), color_by=by('custom_color'), unc=mc,
+                    means=show_means))
             # guideline bar chart, as last set on the Guidelines view
             rows = {lab: g for lab, _, g in guidelines.chart_rows(guide_region, guide_eco)}
             g_row = rows.get(ss.get('opt_gchart_rule'))
@@ -999,6 +1369,46 @@ if view == 'Export':
                     highlight=ss.get('opt_gchart_hlcol', '#000000') if ss.get('opt_gchart_hl') else None,
                     line_colour=ss.get('opt_gchart_linecol', '#222222'),
                     log=ss.get('opt_gchart_log', False), sort=ss.get('opt_gchart_sort', False), unc=mc))
+            # the further analyses, as last set on their views
+            fa = 'further analyses/'
+            if ran['Mixing']:
+                try:
+                    mix = compute_mixing()
+                    pl = mixing_panel_list(mix)
+                    for k in range(0, len(pl), PANELS_PER_PAGE):
+                        add(f'{fa}mixing_{k // PANELS_PER_PAGE + 1}.png', PA.mixing_panels(
+                            vp, mix, pl[k:k + PANELS_PER_PAGE], log=ss.get('opt_mix_log', False), means=show_means,
+                            letters=letters, letters_pos=letters_pos))
+                    add(f'{fa}mixing_deviations.png', PA.deviation_plot(vp, mix, symlog=ss.get('opt_mix_symlog', False)))
+                    add(f'{fa}mixing_cation_exchange.png', PA.exchange_plot(vp, mix))
+                except ValueError as err:
+                    notes.append(f'Mixing: not drawn ({err})')
+            if ran['PCA']:
+                try:
+                    pca, _, _ = compute_pca()
+                    pcs = list(pca['explained'].index)
+                    a = ss.get('opt_pca_x', 'PC1')
+                    b = ss.get('opt_pca_y', 'PC2')
+                    add(f'{fa}pca_biplot.png', PA.pca_biplot(vp, pca, a if a in pcs else pcs[0],
+                                                             b if b in pcs else pcs[1], means=show_means))
+                except ValueError as err:
+                    notes.append(f'PCA: not drawn ({err})')
+            if ran['Clusters']:
+                try:
+                    hca, _, _ = compute_clusters()
+                    add(f'{fa}cluster_dendrogram.png', PA.dendrogram_fig(vp, hca))
+                    add(f'{fa}cluster_piper.png', PA.cluster_piper(vp, hca['labels'], means=show_means))
+                except ValueError as err:
+                    notes.append(f'Clusters: not drawn ({err})')
+            cmp_vars = ss.get('opt_cmp_vars', [])
+            if ran['Group comparison'] and cmp_vars and vp['Label'].nunique() >= 2:
+                kw, _ = A.group_tests(vp, cmp_vars)
+                for k in range(0, len(cmp_vars), PANELS_PER_PAGE):
+                    add(f'{fa}group_boxplots_{k // PANELS_PER_PAGE + 1}.png', PA.box_page(
+                        vp, cmp_vars[k:k + PANELS_PER_PAGE], kw, log=ss.get('opt_cmp_log', False),
+                        letters=letters, letters_pos=letters_pos))
+                if ss.get('opt_cmp_corr', True):
+                    add(f'{fa}spearman_correlations.png', PA.corr_heatmap(*A.spearman(vp, cmp_vars)))
             if notes:
                 z.writestr('notes.txt', '\n'.join(notes) + '\n')
             figure_names = z.namelist()

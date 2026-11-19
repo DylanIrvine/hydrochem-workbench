@@ -734,6 +734,26 @@ def hollow_mask(v, cols):
     return mask
 
 
+def group_means(v):
+    # mean of each analyte (mg/L) and TDS for every Label, with the number of values behind each mean.
+    # Values that rest on a filled pH, temperature or alkalinity are left out (the same values that
+    # are hollow on the plots); below-LOR values count at their replaced value
+    cols = [f'{a} (mg/L)' for a in ANALYTES if v[f'{a} (mg/L)'].notna().any()]
+    cols += ['TDS (mg/L)']
+    means, counts = [], []
+    for lab in pd.unique(v['Label']):
+        g = v[v['Label'] == lab]
+        m = {'Label': lab, 'Samples': len(g)}
+        n = {'Label': lab, 'Samples': len(g)}
+        for c in cols:
+            vals = g[c].where(~hollow_mask(g, [c])).dropna()
+            m[c] = vals.mean() if len(vals) else np.nan
+            n[c] = len(vals)
+        means.append(m)
+        counts.append(n)
+    return pd.DataFrame(means), pd.DataFrame(counts)
+
+
 INTERNAL_COLS = {'Sample', 'Label', 'Color', 'Marker', 'Water type', 'Chadha field', 'Filled', 'Alkalinity from',
                  'HCO3, CO3 from', 'HCO3 is input', 'CO3 is input',
                  'TDS is measured', 'filled_pH', 'filled_Temp', 'filled_HCO3'}

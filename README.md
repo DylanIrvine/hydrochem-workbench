@@ -62,6 +62,8 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
      TDS, Cl, pH, their own ions and each other, the carbonate system,
      irrigation quality (SAR, percent Na) and quality checks
    - Custom plot: any variable against any other
+   - Optional group means on the Piper, gallery and custom plots, drawn as a
+     larger version of each group's marker (the mean of what is on each axis)
 6. **Uncertainty (optional).** Measurement uncertainty is carried through the
    whole calculation by Monte Carlo (JCGM 101:2008), 200 realisations by default.
    Each measured value is drawn from a normal distribution with standard
@@ -84,10 +86,33 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    a/sqrt(3)); the rest are placeholders. `core/uncertainty.py` has the method.
 7. **Export.** Results table with every derived variable, a Settings sheet with
    every option used, the group colours and markers, and any replaced below-LOR
-   values; with the uncertainty analysis on, the inputs used, the 5th and 95th
+   values, and the mean of each analyte for each group (with the number of
+   values behind each mean); with the uncertainty analysis on, the inputs used, the 5th and 95th
    percentiles beside every derived variable, and the per-sample summary. A zip
    of all figures, in classical, gallery and custom plots folders. File names start with the dataset name.
-8. **Several datasets, same settings.** "Load another dataset" replaces the data
+8. **Further analyses**, each in its own view:
+   - *Mixing.* Two or three end members (samples or group means) and one or
+     more conservative tracers (Cl, Br, isotopes or any extra column). Mixing
+     fractions are solved with the fractions summing to 1 (least squares, with
+     each tracer scaled by the end-member spread, when there are more tracers
+     than needed). Every other ion is compared with conservative mixing
+     (measured minus mixing, mmol/L), with a cation-exchange check of Na + K
+     against Ca + Mg (meq/L). Samples outside the end members are flagged. With
+     the uncertainty analysis on, the fractions and deviations get 90 %
+     intervals from the same realisations, so a deviation can be judged against
+     the measurement uncertainty.
+   - *PCA.* Centred log-ratio (default) or log10 and standardised; biplot with
+     loadings and the variance on each component.
+   - *Clusters.* Ward linkage on Euclidean distance (Guler et al. 2002), with a
+     dendrogram, a Piper coloured by cluster and a table of clusters against
+     groups.
+   - *Group comparison.* Box plots by group, Kruskal-Wallis tests and pairwise
+     Mann-Whitney U tests (Holm-adjusted), and a Spearman correlation heat map.
+
+   Warnings appear for few samples, few samples per variable, and variables
+   that are mostly below the LOR. Above 200 samples the app warns that figures
+   may be slow or crowded; everything still runs.
+9. **Several datasets, same settings.** "Load another dataset" replaces the data
    and keeps every setting (units, below-LOR, missing values, plot options,
    group colours and markers, guidelines), so several sites, or an edited sheet,
    can be run the same way.
@@ -116,6 +141,8 @@ usage statistics.
     core/guidelines.py  guideline values and the comparison
     core/gibbs_fields.py  outline of the Gibbs envelope (from WQChartPy)
     core/plots.py     all figures
+    core/advanced.py      mixing, PCA, clusters and group tests (no Streamlit)
+    core/plots_advanced.py  their figures
     core/uncertainty.py  Monte Carlo uncertainty analysis and its default inputs
     core/usage.py     the usage counter
     packages.txt      system font for Streamlit Cloud (Liberation Sans)
@@ -145,8 +172,8 @@ relied on.
 
 ## How to cite
 
-Irvine, D. (2026). Hydrochem Workbench (version 0.10.1) [Web application].
-Charles Darwin University. https://hydrochem-workbench.streamlit.app/
+Irvine, D.J. and Ulloa Cedamanos, F. (2026). Hydrochem Workbench (version 0.13.0)
+[Web application]. Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).
 

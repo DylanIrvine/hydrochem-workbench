@@ -3,6 +3,7 @@ streamlit>=1.50
 numpy>=1.26
 pandas>=2.0
 matplotlib>=3.8
+scipy>=1.11
 openpyxl>=3.1
 phreeqpython>=1.5.5
 wqchartpy>=0.1.10

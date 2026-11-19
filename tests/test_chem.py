@@ -350,3 +350,43 @@ def test_panel_letters_styles_and_gibbs():
     assert [a.texts[-1].get_text() for a in gibbs.axes] == ['(a)', '(b)']
     chadha, _ = plots.wqchartpy_figure(t, 'Chadha', letters='(a)')
     assert not any(tx.get_text() == '(a)' for a in chadha.axes for tx in a.texts)
+
+
+def test_group_means_skip_filled_values():
+    rows = [one_sample(Sample=f'S{k}', Label=lab, pH=ph, Temp=25, Ca=ca, Mg=5, Na=20, K=2,
+                       Total_Alk_CaCO3=alk, Cl=30, SO4=10)
+            for k, (lab, ca, ph, alk) in enumerate([('A', 10, 7.0, 100), ('A', 30, 7.2, np.nan),
+                                                      ('B', 50, 7.4, 120)])]
+    v, _ = run(pd.concat(rows, ignore_index=True))
+    means, counts = chem.group_means(v)
+    a = means.set_index('Label').loc['A']
+    n = counts.set_index('Label').loc['A']
+    assert a['Samples'] == 2
+    assert a['Ca (mg/L)'] == pytest.approx(20.0)
+    assert n['Ca (mg/L)'] == 2
+    # the second A sample has a filled alkalinity, so only the first counts for HCO3
+    assert n['HCO3 (mg/L)'] == 1
+    assert a['HCO3 (mg/L)'] == pytest.approx(v.loc[0, 'HCO3 (mg/L)'])
+    assert 'NO3 (mg/L)' not in means.columns           # not measured, not listed
+
+
+def test_group_mean_markers_are_drawn():
+    from core import plots
+    v = chem.example_data()
+    df, _, extra, _ = chem.clean(v.astype(object))
+    import phreeqpython
+    mmol, src = chem.to_mmol(df, 'mg/L')
+    df, mmol, filled = chem.fill_missing(df, mmol, {'pH': ('mean', 7), 'Temp': ('mean', 25),
+                                                    'HCO3': ('mean', 100)})
+    ph, err, mmol = chem.run_phreeqc(df, mmol, phreeqpython.PhreeqPython(database='phreeqc.dat'))
+    t = chem.build_table(df, mmol, filled, ph, extra, src)
+    n_groups = t['Label'].nunique()
+    base = plots.custom(t, 'Cl (mmol/L)', 'Na (mmol/L)')
+    withm = plots.custom(t, 'Cl (mmol/L)', 'Na (mmol/L)', means=True)
+    count = lambda f: len(f.axes[0].collections)
+    assert count(withm) - count(base) == n_groups
+    labels = [x.get_text() for x in withm.legends[0].get_texts()]
+    assert 'Group mean (large marker)' in labels
+    assert plots.piper(t, means=True) is not None
+    assert plots.gallery_page(t, list(plots.GALLERY.values())[0][:2], means=True) is not None
+    assert plots.custom(t, 'Cl (mmol/L)', 'Na (mmol/L)', color_by='pH', means=True) is not None

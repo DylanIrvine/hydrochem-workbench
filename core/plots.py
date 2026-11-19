@@ -164,9 +164,10 @@ def group_styles(v):
     return styles
 
 
-def _scatter(ax, v, x, y, hollow, styles, cvals=None, size=22, legend=True, zorder=10):
+def _scatter(ax, v, x, y, hollow, styles, cvals=None, size=22, legend=True, zorder=10, means=False):
     # scatter by group, hollow markers where hollow is True
     # if cvals is given, colour by that variable instead (viridis)
+    # means: add each group's mean as a large marker (solid points only, as in the group means table)
     mappable = None
     if cvals is not None:
         ok = cvals.notna()
@@ -194,15 +195,45 @@ def _scatter(ax, v, x, y, hollow, styles, cvals=None, size=22, legend=True, zord
                 ax.scatter(x[open_], y[open_], marker=mk, s=size, facecolors='none',
                            edgecolors=col, linewidths=1.0, zorder=zorder,
                            label=lab if (legend and not solid.any()) else None)
+    if means:
+        _group_means(ax, v, x, y, hollow, styles, cvals, size, zorder)
     return mappable
 
 
-def _legend_handles(styles, any_hollow):
+MEAN_SCALE = 5      # area of a group-mean marker relative to a sample marker
+
+
+def _group_means(ax, v, x, y, hollow, styles, cvals, size, zorder):
+    # mean of the plotted x and y for each group, drawn on top as a large version of its marker.
+    # With colour-by, the marker takes the colour of the group's mean of that variable
+    norm = None
+    if cvals is not None and cvals.notna().any():
+        norm = mcolors.Normalize(vmin=cvals.min(), vmax=cvals.max())
+    for lab, (col, mk) in styles.items():
+        g = (v['Label'] == lab) & x.notna() & y.notna() & ~hollow
+        if not g.any():
+            continue
+        face = col
+        if cvals is not None:
+            cv = cvals[g].dropna()
+            face = matplotlib.colormaps['viridis'](norm(cv.mean())) if (norm is not None and len(cv)) else '0.6'
+        ax.scatter([x[g].mean()], [y[g].mean()], marker=mk, s=size * MEAN_SCALE, color=face,
+                   edgecolors='black', linewidths=1.3, zorder=zorder + 1)
+
+
+def _mean_handle():
+    return Line2D([], [], ls='', marker='o', mfc='0.85', mec='black', mew=1.3, ms=8,
+                  label='Group mean (large marker)')
+
+
+def _legend_handles(styles, any_hollow, means=False):
     handles = [Line2D([], [], ls='', marker=mk, mfc=col, mec='black', mew=0.5, ms=5, label=lab)
                for lab, (col, mk) in styles.items()]
     if any_hollow:
         handles.append(Line2D([], [], ls='', marker='o', mfc='none', mec='0.3', mew=1.0, ms=5,
                               label='Filled input (hollow)'))
+    if means:
+        handles.append(_mean_handle())
     return handles
 
 
@@ -324,7 +355,7 @@ def _piper_unc(ax, v, unc, mode):
 
 
 # %% Piper
-def piper(v, color_by=None, water_legend=False, show_types=True, unc=None, unc_mode='Clouds'):
+def piper(v, color_by=None, water_legend=False, show_types=True, unc=None, unc_mode='Clouds', means=False):
     # Piper diagram, adapted from WQChartPy triangle_piper with coloured fields
     with matplotlib.rc_context(STYLE):
         offset = 0.10
@@ -435,7 +466,7 @@ def piper(v, color_by=None, water_legend=False, show_types=True, unc=None, unc_m
         for xc, yc_ in [('piper_cat_x', 'piper_cat_y'), ('piper_an_x', 'piper_an_y'),
                         ('piper_d_x', 'piper_d_y')]:
             m = _scatter(ax, v, v[xc], v[yc_], hollow, styles, cvals=cvals, size=28,
-                         legend=False, zorder=100)
+                         legend=False, zorder=100, means=means)
             mappable = m or mappable
 
         plotted = v['piper_d_x'].notna()
@@ -448,8 +479,10 @@ def piper(v, color_by=None, water_legend=False, show_types=True, unc=None, unc_m
             if (hollow & plotted).any():
                 handles.append(Line2D([], [], ls='', marker='o', mfc='none', mec='0.3', ms=5,
                                       label='Filled input (hollow)'))
+            if means:
+                handles.append(_mean_handle())
         else:
-            handles = _legend_handles(styles, (hollow & plotted).any())
+            handles = _legend_handles(styles, (hollow & plotted).any(), means)
         if unc_handle is not None:
             handles.append(unc_handle)
         ax.legend(handles=handles, frameon=False, labelspacing=0.3, handletextpad=0.3,
@@ -1045,7 +1078,7 @@ def _gibbs_field(ax, outline):
     ax.fill(xs, ys, facecolor='0.85', edgecolor='0.4', lw=0.6, ls='--', alpha=0.6, zorder=0)
 
 
-def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None):
+def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None, means=False):
     x, y = v[panel['x']], v[panel['y']]
     xlog = panel.get('xlog', False) or (log_conc and panel.get('conc', False))
     ylog = panel.get('ylog', False) or (log_conc and panel.get('conc', False))
@@ -1054,7 +1087,7 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None):
     if ylog:
         y = y.where(y > 0)
     hollow = hollow_mask(v, [panel['x'], panel['y']])
-    mappable = _scatter(ax, v, x, y, hollow, styles, cvals=cvals, legend=False)
+    mappable = _scatter(ax, v, x, y, hollow, styles, cvals=cvals, legend=False, means=means)
     xlo, xhi = _unc_cols(unc, v, panel['x'])
     ylo, yhi = _unc_cols(unc, v, panel['y'])
     has_unc = _interval_lines(ax, x, y, xlo, xhi, ylo, yhi, xlog=xlog, ylog=ylog, colour=unc_colour(unc))
@@ -1168,7 +1201,7 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None):
 
 
 def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters_pos=PANEL_LABEL_POS[0],
-                 unc=None):
+                 unc=None, means=False):
     # up to 6 panels (2 x 3) with one legend along the bottom
     panels = [p for p in panels if available(v, p)]
     if not panels:
@@ -1187,7 +1220,7 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
         any_unc = False
         mappable = None
         for ax, p in zip(axs, panels):
-            m, hol = _draw_panel(ax, v, p, styles, log_conc, cvals=cvals, unc=unc)
+            m, hol = _draw_panel(ax, v, p, styles, log_conc, cvals=cvals, unc=unc, means=means)
             mappable = m or mappable
             any_hollow = any_hollow or bool(hol.any())
             any_unc = any_unc or ax._has_unc
@@ -1202,8 +1235,10 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
             if any_hollow:
                 handles.append(Line2D([], [], ls='', marker='o', mfc='none', mec='0.3', ms=5,
                                       label='Filled input (hollow)'))
+            if means:
+                handles.append(_mean_handle())
         else:
-            handles = _legend_handles(styles, any_hollow)
+            handles = _legend_handles(styles, any_hollow, means)
         if any_unc:
             handles.append(_unc_handle(colour=unc_colour(unc)))
         fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.0),
@@ -1213,7 +1248,7 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
 
 # %% custom plot
 def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zero_line=False,
-           annotate=False, unc=None):
+           annotate=False, unc=None, means=False):
     # user picks x and y
     panel = dict(x=x, y=y, xlog=xlog, ylog=ylog, lines=[], origin=True)
     if one_to_one:
@@ -1225,7 +1260,7 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
     with matplotlib.rc_context(STYLE):
         fig = Figure(figsize=(17 * CM, 10 * CM), dpi=150)
         ax = fig.add_axes([0.1, 0.13, 0.58, 0.83])
-        mappable, hol = _draw_panel(ax, v, panel, styles, False, cvals=cvals, unc=unc)
+        mappable, hol = _draw_panel(ax, v, panel, styles, False, cvals=cvals, unc=unc, means=means)
         if annotate:
             ok = v[x].notna() & v[y].notna()
             for i in v.index[ok]:
@@ -1239,8 +1274,10 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
             if hol.any():
                 handles.append(Line2D([], [], ls='', marker='o', mfc='none', mec='0.3', ms=5,
                                       label='Filled input (hollow)'))
+            if means:
+                handles.append(_mean_handle())
         else:
-            handles = _legend_handles(styles, bool(hol.any()))
+            handles = _legend_handles(styles, bool(hol.any()), means)
         if ax._has_unc:
             handles.append(_unc_handle(colour=unc_colour(unc)))
         fig.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(0.69, 0.96))
