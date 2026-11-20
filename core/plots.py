@@ -41,6 +41,10 @@ import matplotlib.text
 import matplotlib.patches
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
+from matplotlib.offsetbox import AnnotationBbox, HPacker, OffsetImage, TextArea
+import matplotlib.image as mimage
+import matplotlib.transforms as mtransforms
+from pathlib import Path
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
@@ -1378,7 +1382,44 @@ def guideline_bars(v, var, lines, bar_colour=None, highlight=None, line_colour='
 
 
 # %% png for download
+BADGE_PT = 14       # height of the app icon in the 'Made using' badge, in points
+
+
+def _badge_at(fig, x, y, transform):
+    # 'Made using HydroCHEM' with the app icon, right-aligned at (x, y). Skipped if the icon is missing
+    if getattr(fig, '_badged', False):
+        return
+    try:
+        img = mimage.imread(BADGE_ICON)
+    except (FileNotFoundError, OSError):
+        return
+    packed = HPacker(children=[TextArea('Made using HydroCHEM', textprops=dict(fontsize=6, color='0.5')),
+                               OffsetImage(img, zoom=BADGE_PT / img.shape[0])],
+                     align='center', pad=0, sep=3)
+    fig.add_artist(AnnotationBbox(packed, (x, y), xycoords=transform, box_alignment=(1, 0.5),
+                                  frameon=False, pad=0, annotation_clip=False))
+
+
+BADGE_ICON = Path(__file__).resolve().parents[1] / 'logo' / 'HydroCHEM_badge.png'
+
+
+def add_badge(fig):
+    # bottom right of what is drawn (legends included), in a strip just below it so it can be cropped off
+    if getattr(fig, '_badged', False):
+        return
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    if not hasattr(fig.canvas, 'get_renderer'):
+        FigureCanvasAgg(fig)
+    fig.canvas.draw()
+    box = fig.get_tightbbox(fig.canvas.get_renderer())
+    width, height = fig.get_size_inches()
+    below = fig.transFigure + mtransforms.ScaledTranslation(0, -(BADGE_PT / 2 + 4) / 72, fig.dpi_scale_trans)
+    _badge_at(fig, box.x1 / width, box.y0 / height, below)
+    fig._badged = True
+
+
 def fig_png(fig, dpi=300):
+    add_badge(fig)
     import io
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')

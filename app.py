@@ -86,7 +86,7 @@ head_text, head_logo = st.columns([3, 1], vertical_alignment='center')
 with head_text:
     st.title(APP_NAME)
     st.subheader('Hydrochemistry plots and PHREEQC saturation indices')
-    st.write('Dylan J. Irvine and Francesco Ulloa Cedamanos, Charles Darwin University.')
+    st.write('Dylan J. Irvine, Charles Darwin University.')
     st.caption(f'Version {APP_VERSION}')
 with head_logo:
     st.image('logo/HydroCHEM_logo.png', width='stretch')
@@ -203,7 +203,7 @@ with st.expander('**Privacy and data handling**'):
 with st.expander('**How to cite and references**'):
     st.markdown(
         '**This app**\n\n'
-        f'Irvine, D.J. and Ulloa Cedamanos, F. (2026). Hydrochem Workbench (version {APP_VERSION}) '
+        f'Irvine, D.J. (2026). Hydrochem Workbench (version {APP_VERSION}) '
         '[Web application]. '
         f'Charles Darwin University. {APP_URL}\n\n'
         'Please also cite the software it is built on.\n\n'
@@ -334,6 +334,7 @@ def monte_carlo(base, table, n):
 
 
 def show(fig, name, key):
+    plots.add_badge(fig)
     st.pyplot(fig, width='stretch')
     st.download_button('Download PNG (600 dpi)', plots.fig_png(fig, dpi=600),
                        file_name=name + '.png', mime='image/png', key=key)

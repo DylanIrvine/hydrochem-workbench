@@ -172,7 +172,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D.J. and Ulloa Cedamanos, F. (2026). Hydrochem Workbench (version 0.13.0)
+Irvine, D.J. (2026). Hydrochem Workbench (version 0.13.0)
 [Web application]. Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).
