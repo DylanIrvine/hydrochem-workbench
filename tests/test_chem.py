@@ -390,3 +390,21 @@ def test_group_mean_markers_are_drawn():
     assert plots.piper(t, means=True) is not None
     assert plots.gallery_page(t, list(plots.GALLERY.values())[0][:2], means=True) is not None
     assert plots.custom(t, 'Cl (mmol/L)', 'Na (mmol/L)', color_by='pH', means=True) is not None
+
+
+def test_charge_balance_check():
+    v = pd.DataFrame({'CBE (%)': [1.0, -6.0, 8.0, np.nan, 0.0, 12.0],
+                      'filled_HCO3': [False, False, False, False, True, True]})
+    out = chem.charge_balance_check(v, 5.0)
+    assert list(out) == [chem.CB_WITHIN, chem.CB_BEYOND, chem.CB_BEYOND, chem.CB_NA, chem.CB_NA, chem.CB_NA]
+    assert list(chem.charge_balance_check(v, 10.0))[:3] == [chem.CB_WITHIN] * 3
+    # with the uncertainty interval: beyond only if the whole interval is
+    lo = pd.Series([-1.0, -9.0, 3.0, np.nan, -2.0, 9.0])
+    hi = pd.Series([3.0, -5.5, 13.0, np.nan, 2.0, 15.0])
+    out = chem.charge_balance_check(v, 5.0, lo, hi)
+    assert list(out)[:3] == [chem.CB_WITHIN, chem.CB_BEYOND, chem.CB_WITHIN]
+    # a limit of 0 flags every sample whose interval does not include zero
+    assert list(chem.charge_balance_check(v, 0.0, lo, hi))[:3] == [chem.CB_WITHIN, chem.CB_BEYOND, chem.CB_BEYOND]
+    # no interval for a sample: judged on the calculated value
+    lo[2] = hi[2] = np.nan
+    assert chem.charge_balance_check(v, 5.0, lo, hi)[2] == chem.CB_BEYOND

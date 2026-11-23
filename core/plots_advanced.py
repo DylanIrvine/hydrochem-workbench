@@ -100,7 +100,7 @@ def mixing_panels(v, res, panels, log=False, means=False, letters=None, letters_
         for ax in axs[n:]:
             ax.axis('off')
         plots.panel_letters(axs[:n], letters, letters_pos)
-        handles = plots._legend_handles(styles, any_hollow, means) + [_em_handle(), _mix_handle()]
+        handles = plots._legend_handles(styles, any_hollow, means) + plots.ring_handles(v) + [_em_handle(), _mix_handle()]
         fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=min(4, len(handles)),
                    frameon=False)
     return fig
@@ -184,7 +184,7 @@ def exchange_plot(v, res):
                 ha='right', va='bottom', **kw)
         ax.set_xlabel('Ca + Mg, measured minus mixing (meq/L)')
         ax.set_ylabel('Na + K, measured minus mixing (meq/L)')
-        handles = plots._legend_handles(styles, False) + [
+        handles = plots._legend_handles(styles, False) + plots.ring_handles(v) + [
             Line2D([], [], ls='--', color='0.35', lw=0.8, label='1:-1 (cation exchange)')]
         fig.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(0.66, 0.96))
     return fig
@@ -228,7 +228,7 @@ def pca_biplot(v, res, a='PC1', b='PC2', means=False):
         ax2.set_ylabel('Variance (%)', fontsize=7)
         ax2.set_ylim(0, 100)
         ax2.tick_params(labelsize=6)
-        handles = plots._legend_handles(styles, False, means)
+        handles = plots._legend_handles(styles, False, means) + plots.ring_handles(vv)
         fig.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(0.72, 0.5))
     return fig
 

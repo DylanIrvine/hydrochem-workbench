@@ -32,7 +32,7 @@ from core import chem, guidelines, plots, uncertainty, usage, advanced, plots_ad
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.14.2'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.14.3'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,

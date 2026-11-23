@@ -97,7 +97,7 @@ def locations(v):
     # Sample, Label, lat, lon, depth for the rows that can be mapped, and notes for the user
     cols = chem.location_columns(v.columns)
     notes = []
-    empty = pd.DataFrame(columns=['Sample', 'Label', 'lat', 'lon', 'depth'])
+    empty = pd.DataFrame(columns=['Sample', 'Label', 'lat', 'lon', 'depth', 'ring', 'ring_label'])
     if cols['Lat'] is None or cols['Lon'] is None:
         return empty, ['There are no Lat and Lon columns in this dataset. Add them (decimal degrees) to map '
                        'the samples; the template has them.']
@@ -105,6 +105,9 @@ def locations(v):
                         'lat': pd.to_numeric(v[cols['Lat']], errors='coerce'),
                         'lon': pd.to_numeric(v[cols['Lon']], errors='coerce')})
     pts['depth'] = pd.to_numeric(v[cols['Screen_depth']], errors='coerce') if cols['Screen_depth'] else np.nan
+    # charge balance ring, if the app has marked any samples
+    pts['ring'] = v[chem.CB_RING] if chem.CB_RING in v.columns else ''
+    pts['ring_label'] = v[chem.CB_LABEL] if chem.CB_LABEL in v.columns else ''
 
     has = pts['lat'].notna() & pts['lon'].notna()
     if (~has).any():
@@ -601,6 +604,11 @@ def sample_map(pts, styles, extent, basemap=None, size=30.0, by_depth=False, rev
                 if len(g):
                     ax.scatter(g['lon'], g['lat'], s=areas[g.index], marker=mk, color=col, edgecolors=edge,
                                linewidths=edge_width, alpha=0.9, zorder=10)
+        ringed = inside[inside['ring'] != ''] if 'ring' in inside.columns else inside.iloc[:0]
+        for i in ringed.index:
+            ax.scatter([ringed.at[i, 'lon']], [ringed.at[i, 'lat']], s=areas[i] * plots.RING_SCALE,
+                       marker=styles[ringed.at[i, 'Label']][1], facecolors='none', edgecolors=ringed.at[i, 'ring'],
+                       linewidths=plots.RING_WIDTH, zorder=10.6)
         if labels:
             for i in inside.index:
                 ax.annotate(inside.at[i, 'Sample'], (inside.at[i, 'lon'], inside.at[i, 'lat']), xytext=(3, 3),
@@ -643,6 +651,9 @@ def sample_map(pts, styles, extent, basemap=None, size=30.0, by_depth=False, rev
         mec = edge if mcolors.to_rgb(edge)[0] < 0.6 else 'black'
         handles = [Line2D([], [], ls='', marker=styles[lab][1], mfc=styles[lab][0], mec=mec, mew=edge_width, ms=5,
                           label=lab) for lab in used]
+        if len(ringed):
+            handles.append(Line2D([], [], ls='', marker='o', mfc='none', mec=ringed['ring'].iloc[0],
+                                  mew=plots.RING_WIDTH, ms=7, label=ringed['ring_label'].iloc[0]))
         if n_towns:
             handles.append(Line2D([], [], ls='', marker='s', mfc='black', mec='0.6', mew=0.6, ms=4, label='Town'))
         for layer in polys:

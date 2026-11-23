@@ -339,3 +339,22 @@ def test_badge_text():
     words = [t.get_text() for area in fig.findobj(TextArea) for t in area.findobj(lambda a: hasattr(a, 'get_text'))
              if hasattr(t, 'get_text')]
     assert 'Made using the Hydrochem Workbench' in words and not any('Irvine' in w for w in words)
+
+
+def test_charge_balance_rings_on_the_map():
+    d = chem.example_data()
+    d[chem.CB_RING] = ''
+    d.loc[[11, 14], chem.CB_RING] = '#ff00ff'
+    d[chem.CB_LABEL] = 'Charge balance beyond 5 %'
+    pts, _ = maps.locations(d)
+    fig = maps.sample_map(pts, styles_for(pts), maps.fit_extent(maps.data_extent(pts)))
+    assert 'Charge balance beyond 5 %' in figure_texts(fig)
+    rings = [c for c in fig.axes[0].collections
+             if len(c.get_edgecolors()) and tuple(c.get_edgecolors()[0][:3]) == (1.0, 0.0, 1.0)]
+    assert len(rings) == 2 and all(c.get_linewidths()[0] == plots.RING_WIDTH for c in rings)
+    # nothing marked: no rings and no legend entry
+    d[chem.CB_RING] = ''
+    pts, _ = maps.locations(d)
+    fig = maps.sample_map(pts, styles_for(pts), maps.fit_extent(maps.data_extent(pts)))
+    assert 'Charge balance beyond 5 %' not in figure_texts(fig)
+    assert plots.ring_default(['#FF00FF', '#0089D0']) != '#FF00FF'

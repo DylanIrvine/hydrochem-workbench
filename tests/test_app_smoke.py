@@ -457,3 +457,56 @@ def test_map_uploads(tmp_path, monkeypatch):
     at.radio[0].set_value('Map').run()
     at.button(key='map_towns_remove').click().run()
     assert not at.exception and 'map_towns' not in at.session_state
+
+
+def test_charge_balance_options(tmp_path, monkeypatch):
+    # mark (the default), exclude and no action; then judged on the uncertainty interval
+    import numpy as np
+    from core import chem, maps
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    monkeypatch.setattr(maps, 'fetch_basemap', lambda extent, zoom: (np.full((60, 80, 4), 120, dtype=np.uint8), extent))
+    at = AppTest.from_file(APP, default_timeout=180)
+    at.run()
+    at.checkbox[0].check().run()
+    assert not at.exception
+    assert any('4 sample(s) have a charge balance error beyond 5 %' in i.value and 'marked with a ring' in i.value
+               for i in at.info)
+    assert at.color_picker(key='opt_cb_col').value.lower() not in [
+        c.value.lower() for c in at.color_picker if c.key.startswith('grp_col_')]
+    for view in ('Piper', 'Diagnostic gallery', 'Custom plot', 'Map', 'PCA'):
+        at.radio[0].set_value(view).run()
+        assert not at.exception
+    at.radio[0].set_value('Data and checks').run()
+    means_marked = [d.value for d in at.dataframe][1].copy()
+
+    at.selectbox(key='opt_cb_action').select('Exclude from the plots and analyses').run()
+    assert not at.exception and any('left off every plot' in i.value for i in at.info)
+    assert not [c for c in at.color_picker if c.key == 'opt_cb_col']
+    tables = [d.value for d in at.dataframe]
+    assert len(tables[0]) == 26                                  # every sample is still in the summary
+    assert (tables[0][chem.CB_COL] == chem.CB_BEYOND).sum() == 4
+    assert (tables[0][chem.CB_COL] == chem.CB_NA).sum() == 1     # the sample with a filled alkalinity
+    sand = lambda t: t[t['Label'].str.startswith('Sandstone')].iloc[0]
+    assert sand(tables[1])['Samples'] == sand(means_marked)['Samples'] - 4
+    assert any('excluded for their charge balance' in c.value for c in at.caption)
+    for view in ('Piper', 'Map', 'Clusters', 'Export'):
+        at.radio[0].set_value(view).run()
+        assert not at.exception
+
+    at.selectbox(key='opt_cb_action').select('No action').run()
+    assert not at.exception and any('No action is taken' in i.value for i in at.info)
+    at.number_input(key='opt_cb_limit').set_value(25.0).run()
+    assert not at.exception and not any('charge balance error beyond' in i.value for i in at.info)
+
+    # with the uncertainty analysis, a sample is beyond the limit only if its whole interval is
+    at.number_input(key='opt_cb_limit').set_value(5.0).run()
+    at.selectbox(key='opt_cb_action').select('Mark on the plots').run()
+    at.checkbox(key='opt_unc').check().run()
+    at.number_input(key='opt_unc_n').set_value(40).run()
+    at.selectbox(key='opt_cb_basis').select('The uncertainty interval').run()
+    assert not at.exception
+    note = [i.value for i in at.info if 'charge balance error beyond' in i.value]
+    assert note and 'even allowing for measurement uncertainty' in note[0]
+    assert int(note[0].split()[0]) <= 4
+    at.radio[0].set_value('Piper').run()
+    assert not at.exception
