@@ -64,6 +64,7 @@ RATIO = (0.45, 1.25)    # height / width of the map panel is kept in this range
 SIZE_RANGE = (0.4, 3.0)  # marker area of the smallest and largest depth, times the chosen size
 MAX_LEGEND_DEPTHS = 4
 MAX_LAYERS = 3           # polygon or line layers on the map
+AXIS_LABEL_SIZE = 10     # Longitude and Latitude, points (tick labels and the legend are 8)
 NORTH_SIZE = 13          # north arrow triangle, points
 
 TOWN_COLS = ['Name', 'Lat', 'Lon']
@@ -626,8 +627,10 @@ def sample_map(pts, styles, extent, basemap=None, size=30.0, by_depth=False, rev
         for axis in (ax.xaxis, ax.yaxis):
             axis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
             axis.set_major_formatter(fmt)
-        ax.set_xlabel('Longitude')
-        ax.set_ylabel('Latitude')
+        # the size is given here and not left to the style: drawing a polygon layer with geopandas
+        # shrinks the axis labels
+        ax.set_xlabel('Longitude', fontsize=AXIS_LABEL_SIZE)
+        ax.set_ylabel('Latitude', fontsize=AXIS_LABEL_SIZE)
 
         km = scale_bar(ax, extent, scale_corner, fg, bg)
         north_arrow(ax, north_corner, fg, bg)

@@ -323,6 +323,11 @@ def test_three_layers():
     fig = maps.sample_map(pts, styles_for(pts), extent, poly=layers)
     texts = figure_texts(fig)
     assert all(name in texts for name in ('Region', 'Rivers', 'Roads'))
+    # the axis labels keep their size with layers drawn (geopandas shrinks them otherwise)
+    plots.fig_png(fig, dpi=50)
+    ax = fig.axes[0]
+    assert ax.xaxis.label.get_fontsize() == ax.yaxis.label.get_fontsize() == maps.AXIS_LABEL_SIZE == 10
+    assert {t.get_fontsize() for t in ax.get_xticklabels() + ax.get_yticklabels()} == {8.0}
     assert maps.MAX_LAYERS == 3
 
 
