@@ -32,7 +32,7 @@ from core import chem, guidelines, plots, uncertainty, usage, advanced, plots_ad
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.14.3'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.15.0'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -469,6 +469,31 @@ with st.sidebar:
                        st.session_state.get('unc_current', st.session_state.get('unc_base', U.default_table()))))
                        ['Source'] == 'Entered by user').any() else 'Default values are in use.'))
 
+    st.header('7. Charge balance')
+    CB_BASES = ['The calculated value', 'The uncertainty interval']
+    CB_ACTIONS = ['Mark on the plots', 'Exclude from the plots and analyses', 'No action']
+    cb_limit = st.number_input('Limit on the charge balance error (%)', min_value=0.0, max_value=50.0, step=1.0,
+                               key=opt('opt_cb_limit', 5.0),
+                               help='Either side of zero. Samples whose alkalinity was filled are not assessed: '
+                                    'filling from the charge balance forces the error to zero, and a mean or '
+                                    'fixed value was not measured.')
+    cb_basis = st.selectbox('Judged on', CB_BASES, key=opt('opt_cb_basis', CB_BASES[0], CB_BASES),
+                            disabled=not use_unc,
+                            help='Needs the uncertainty analysis. With "The uncertainty interval" a sample is '
+                                 'beyond the limit only if its whole 5th to 95th percentile interval of charge '
+                                 'balance error is, that is, if measurement uncertainty cannot bring it within '
+                                 'the limit. With a limit of 0 this flags every sample whose interval does not '
+                                 'include zero.')
+    if not use_unc:
+        cb_basis = CB_BASES[0]
+    cb_action = st.selectbox('Samples beyond the limit', CB_ACTIONS, key=opt('opt_cb_action', CB_ACTIONS[0], CB_ACTIONS),
+                             help='Marked samples get a thick ring in another colour (set with the group '
+                                  'colours) on the Piper diagram, the gallery, custom, mixing and PCA plots and '
+                                  'the map. Excluded samples are left off every plot and out of the group means '
+                                  'and the further analyses. Either way every sample stays in the tables and '
+                                  'the guideline comparison, with its status in the "Charge balance check" '
+                                  'column.')
+
 HOW = {'Mean of the dataset': 'mean', 'Fixed value': 'value', 'From charge balance': 'balance'}
 rules = (('pH', (HOW[ph_how], ph_val)), ('Temp', (HOW[t_how], t_val)), ('HCO3', (HOW[h_how], h_val)))
 
@@ -561,6 +586,12 @@ with st.expander(f'**Groups (Label): colours, markers and which to plot** ({len(
         mk_name = c4.selectbox('Marker', names, key=opt('grp_mk_' + lab, names[codes.index(mk0)], names),
                                label_visibility='collapsed')
         group_style[lab] = (col, codes[names.index(mk_name)])
+    cb_col = '#FF00FF'
+    if cb_action == CB_ACTIONS[0]:
+        c1, c2 = st.columns([4, 4], vertical_alignment='center')
+        c1.write('Ring around samples beyond the charge balance limit')
+        cb_col = c2.color_picker('Ring colour', label_visibility='collapsed',
+                                 key=opt('opt_cb_col', plots.ring_default([c for c, _ in group_style.values()])))
     st.caption('Unticked groups are left off every plot. The tables and the results download '
                'keep all samples.')
 
@@ -605,8 +636,27 @@ if use_unc:
 v = v.copy()
 v['Color'] = v['Label'].map(lambda l: group_style[l][0])
 v['Marker'] = v['Label'].map(lambda l: group_style[l][1])
+
+# %% charge balance check
+cb_unc = mc is not None and cb_basis == CB_BASES[1]
+v[chem.CB_COL] = chem.charge_balance_check(v, cb_limit, mc['lo']['CBE (%)'] if cb_unc else None,
+                                           mc['hi']['CBE (%)'] if cb_unc else None)
+cb_beyond = v[chem.CB_COL] == chem.CB_BEYOND
+cb_exclude = cb_beyond & (cb_action == CB_ACTIONS[1])
+cb_text = (f'Charge balance beyond {cb_limit:g} %' + (', allowing for uncertainty' if cb_unc else ''))
+v[chem.CB_RING] = [cb_col if (b and cb_action == CB_ACTIONS[0]) else '' for b in cb_beyond]
+v[chem.CB_LABEL] = cb_text
+if cb_beyond.any():
+    done = {CB_ACTIONS[0]: 'They are marked with a ring on the plots.',
+            CB_ACTIONS[1]: 'They are left off every plot and out of the group means and the further analyses, '
+                           'and stay in the tables.',
+            CB_ACTIONS[2]: 'No action is taken (see "7. Charge balance" in the sidebar).'}[cb_action]
+    names = list(v.loc[cb_beyond, 'Sample'].astype(str))
+    st.info(f"{int(cb_beyond.sum())} sample(s) have a charge balance error beyond {cb_limit:g} %"
+            + (' even allowing for measurement uncertainty' if cb_unc else '') + ': '
+            + ', '.join(names[:8]) + (' ...' if len(names) > 8 else '') + '. ' + done)
 # vp is what the plots see
-vp = v[v['Label'].isin(shown)]
+vp = v[v['Label'].isin(shown) & ~cb_exclude]
 
 numeric_choices = chem.plottable(v)
 color_opts = ['Group (Label)'] + numeric_choices
@@ -622,11 +672,14 @@ if view == 'Data and checks':
     c1, c2, c3, c4 = st.columns(4)
     c1.metric('Samples', len(v))
     c2.metric('Groups', v['Label'].nunique())
-    cbe_ok = (v['CBE (%)'].abs() <= 5).sum()
-    c3.metric('Charge balance within 5 %', f'{int(cbe_ok)} of {int(v["CBE (%)"].notna().sum())}')
+    cbe_ok = (v[chem.CB_COL] == chem.CB_WITHIN).sum()
+    c3.metric(f'Charge balance within {cb_limit:g} %',
+              f'{int(cbe_ok)} of {int((v[chem.CB_COL] != chem.CB_NA).sum())}',
+              help='Of the samples that can be assessed (a measured alkalinity). Set in "7. Charge balance" '
+                   'in the sidebar.')
     c4.metric('Filled samples', n_filled)
 
-    summary_cols = ['Sample', 'Label', 'Water type', 'Chadha field', 'CBE (%)', 'TDS (mg/L)', 'pH',
+    summary_cols = ['Sample', 'Label', 'Water type', 'Chadha field', 'CBE (%)', chem.CB_COL, 'TDS (mg/L)', 'pH',
                     'Alkalinity (mg/L as CaCO3)', 'HCO3 (mg/L)', 'CO3 (mg/L)', 'HCO3, CO3 from', 'log pCO2',
                     'Ionic strength (mol/kgw)'] + [c for c in v.columns if c.startswith('SI ') and v[c].notna().any()] + ['Filled']
     st.subheader('Summary')
@@ -636,13 +689,18 @@ if view == 'Data and checks':
                'both from the alkalinity and pH (each includes its ion pairs, so HCO3 + 2 CO3, in '
                'meq/L, adds up to the carbonate alkalinity). "HCO3, CO3 from" shows which. '
                'Saturation indices and pCO2 always come from the alkalinity (or DIC) and pH. '
-               'CBE is signed: positive means excess cations. TDS is the measured value where '
+               'CBE is signed: positive means excess cations. "Charge balance check" compares it with the '
+               f'limit of {cb_limit:g} %' + (' using the 5th to 95th percentile interval from the uncertainty '
+                                             'analysis' if cb_unc else '') +
+               '; samples with a filled alkalinity are not assessable. TDS is the measured value where '
                'given, otherwise the sum of ions with bicarbonate x 0.4917.')
 
     st.subheader('Group means')
-    g_means, g_counts = chem.group_means(v)
+    g_means, g_counts = chem.group_means(v[~cb_exclude])
     st.dataframe(g_means.round(3), width='stretch', hide_index=True)
     st.caption('Arithmetic mean of each analyte (mg/L) and TDS for each group, all groups included. '
+               + (f'{int(cb_exclude.sum())} sample(s) excluded for their charge balance are left out. '
+                  if cb_exclude.any() else '') +
                'Values below the LOR count at their replaced value. Values that rest on a filled pH, '
                'temperature or alkalinity (HCO3, CO3, and TDS where it was calculated) are left out, as they '
                'are drawn hollow on the plots. Samples is the group size; the number of values behind each '
@@ -1499,7 +1557,8 @@ if view == 'Map':
 # %% view: export
 if view == 'Export':
     st.subheader('Results table')
-    out_cols = [c for c in v.columns if not c.startswith('piper_') and c not in ('Color', 'Marker')]
+    out_cols = [c for c in v.columns if not c.startswith('piper_')
+                and c not in ('Color', 'Marker', chem.CB_RING, chem.CB_LABEL)]
     lor_used = ('Not replaced' if not (lor_text or lor_neg) else
                 f'{lor_fraction:g} x LOR for ' + ' and '.join(
                     [w for w, on in (('"<" values', lor_text), ('negative concentrations', lor_neg)) if on]))
@@ -1525,6 +1584,14 @@ if view == 'Export':
         ('Missing values', 'Missing pH', ph_how + (f' ({ph_val})' if ph_how == 'Fixed value' else '')),
         ('Missing values', 'Missing temperature', t_how + (f' ({t_val} deg C)' if t_how == 'Fixed value' else '')),
         ('Missing values', 'Missing alkalinity', h_how + (f' ({h_val} mg/L as CaCO3)' if h_how == 'Fixed value' else '')),
+        ('Charge balance', 'Limit (%)', cb_limit),
+        ('Charge balance', 'Judged on', (cb_basis + ' (5th to 95th percentile wholly beyond the limit)')
+         if cb_unc else CB_BASES[0]),
+        ('Charge balance', 'Samples beyond the limit', cb_action),
+        ('Charge balance', 'Beyond the limit', ', '.join(v.loc[cb_beyond, 'Sample'].astype(str)) or 'None'),
+        ('Charge balance', 'Not assessable (alkalinity filled, or no CBE)',
+         ', '.join(v.loc[v[chem.CB_COL] == chem.CB_NA, 'Sample'].astype(str)) or 'None'),
+        ('Charge balance', 'Ring colour', cb_col if cb_action == CB_ACTIONS[0] else ''),
         ('Groups', 'Plotted', ', '.join(shown) if shown else 'None'),
         ('Groups', 'Not plotted', ', '.join(l for l in labels if l not in shown) or 'None'),
         ('Groups', 'Colours and markers', 'See the Groups sheet'),
@@ -1615,7 +1682,7 @@ if view == 'Export':
                       'Colour': [group_style[lab][0] for lab in labels],
                       'Marker': [group_style[lab][1] for lab in labels]}).to_excel(
             xl, sheet_name='Groups', index=False)
-        g_means, g_counts = chem.group_means(v)
+        g_means, g_counts = chem.group_means(v[~cb_exclude])
         g_means.to_excel(xl, sheet_name='Group means', index=False)
         g_counts.to_excel(xl, sheet_name='Group mean counts', index=False)
         if n_replaced:

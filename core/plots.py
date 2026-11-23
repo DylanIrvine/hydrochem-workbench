@@ -48,7 +48,7 @@ from pathlib import Path
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
-from core.chem import SEAWATER_MMOL, hollow_mask
+from core.chem import SEAWATER_MMOL, hollow_mask, CB_RING, CB_LABEL
 from core import gibbs_fields
 
 CM = 1.0 / 2.54
@@ -199,9 +199,47 @@ def _scatter(ax, v, x, y, hollow, styles, cvals=None, size=22, legend=True, zord
                 ax.scatter(x[open_], y[open_], marker=mk, s=size, facecolors='none',
                            edgecolors=col, linewidths=1.0, zorder=zorder,
                            label=lab if (legend and not solid.any()) else None)
+    _rings(ax, v, x, y, styles, size, zorder)
     if means:
         _group_means(ax, v, x, y, hollow, styles, cvals, size, zorder)
     return mappable
+
+
+# %% charge balance rings
+RING_SCALE = 2.4    # area of the ring relative to the marker it goes around
+RING_WIDTH = 1.4
+# the default ring colour is the one of these furthest from the group colours
+RING_CHOICES = ['#FF00FF', '#00E5FF', '#FF0000', '#FFE600', '#00FF66', '#000000']
+
+
+def ring_default(colours):
+    # a ring colour that is not one of the group colours
+    used = [mcolors.to_rgb(c) for c in colours if mcolors.is_color_like(c)]
+    if not used:
+        return RING_CHOICES[0]
+    gap = lambda c: min(sum((a - b) ** 2 for a, b in zip(mcolors.to_rgb(c), u)) for u in used)
+    return max(RING_CHOICES, key=gap)
+
+
+def _rings(ax, v, x, y, styles, size=22, zorder=10):
+    # a thick ring in another colour around each sample marked for its charge balance
+    if CB_RING not in v.columns:
+        return
+    marked = (v[CB_RING] != '') & x.notna() & y.notna()
+    for lab, (_, mk) in styles.items():
+        g = marked & (v['Label'] == lab)
+        if g.any():
+            ax.scatter(x[g], y[g], marker=mk, s=size * RING_SCALE, facecolors='none',
+                       edgecolors=v.loc[g, CB_RING].iloc[0], linewidths=RING_WIDTH, zorder=zorder + 0.6)
+
+
+def ring_handles(v):
+    # legend entry for the rings, if any sample in v is marked
+    if CB_RING not in v.columns or not (v[CB_RING] != '').any():
+        return []
+    row = v[v[CB_RING] != ''].iloc[0]
+    return [Line2D([], [], ls='', marker='o', mfc='none', mec=row[CB_RING], mew=RING_WIDTH, ms=7,
+                   label=row[CB_LABEL])]
 
 
 MEAN_SCALE = 5      # area of a group-mean marker relative to a sample marker
@@ -487,6 +525,7 @@ def piper(v, color_by=None, water_legend=False, show_types=True, unc=None, unc_m
                 handles.append(_mean_handle())
         else:
             handles = _legend_handles(styles, (hollow & plotted).any(), means)
+        handles += ring_handles(v[plotted])
         if unc_handle is not None:
             handles.append(unc_handle)
         ax.legend(handles=handles, frameon=False, labelspacing=0.3, handletextpad=0.3,
@@ -1243,6 +1282,7 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
                 handles.append(_mean_handle())
         else:
             handles = _legend_handles(styles, any_hollow, means)
+        handles += ring_handles(v)
         if any_unc:
             handles.append(_unc_handle(colour=unc_colour(unc)))
         fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.0),
@@ -1282,6 +1322,7 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
                 handles.append(_mean_handle())
         else:
             handles = _legend_handles(styles, bool(hol.any()), means)
+        handles += ring_handles(v[v[x].notna() & v[y].notna()])
         if ax._has_unc:
             handles.append(_unc_handle(colour=unc_colour(unc)))
         fig.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(0.69, 0.96))

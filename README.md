@@ -117,7 +117,16 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    and keeps every setting (units, below-LOR, missing values, plot options,
    group colours and markers, guidelines), so several sites, or an edited sheet,
    can be run the same way.
-10. **Map.** If the template has `Lat` and `Lon` (decimal degrees, optional),
+10. **Charge balance.** Each sample is checked against a limit on the charge
+    balance error (5 % by default), either on the calculated value or, with the
+    uncertainty analysis on, on its 5th to 95th percentile interval (beyond the
+    limit only if the whole interval is). Samples beyond the limit are marked
+    with a thick ring in another colour on the Piper diagram, the gallery,
+    custom, mixing and PCA plots and the map (the default), or excluded from
+    every plot, the group means and the further analyses, or left alone. All
+    samples stay in the tables with a "Charge balance check" column. A sample
+    whose alkalinity was filled is "Not assessable".
+11. **Map.** If the template has `Lat` and `Lon` (decimal degrees, optional),
     the Map view draws the samples with their group colour and marker over
     satellite imagery (Esri World Imagery) or a white background, with a scale
     bar, north arrow and a locator inset. Marker size can follow `Screen_depth`
@@ -206,7 +215,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D.J. (2026). Hydrochem Workbench (version 0.14.3)
+Irvine, D.J. (2026). Hydrochem Workbench (version 0.15.0)
 [Web application]. Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).

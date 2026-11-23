@@ -784,7 +784,35 @@ def group_means(v):
     return pd.DataFrame(means), pd.DataFrame(counts)
 
 
-INTERNAL_COLS = {'Sample', 'Label', 'Color', 'Marker', 'Water type', 'Chadha field', 'Filled', 'Alkalinity from',
+# %% charge balance check
+CB_COL = 'Charge balance check'
+CB_WITHIN, CB_BEYOND, CB_NA = 'Within limit', 'Beyond limit', 'Not assessable'
+# set by the app for the plots: the ring colour of a marked sample ('' if not marked) and its legend text
+CB_RING = 'cb_ring'
+CB_LABEL = 'cb_ring_label'
+
+
+def charge_balance_check(v, limit=5.0, lo=None, hi=None):
+    # each sample as within the limit, beyond it, or not assessable
+    # limit: charge balance error, in %, either side of zero
+    # lo, hi: the 5th and 95th percentiles of CBE from the uncertainty analysis. If given, a sample is
+    #   beyond the limit only if its whole interval is, so measurement uncertainty cannot bring it within.
+    #   Samples with no interval are judged on the calculated value
+    # not assessable: no CBE, or the alkalinity was filled (from the charge balance itself, which
+    #   forces CBE to zero, or with a mean or fixed value that was not measured)
+    cbe = v['CBE (%)'].astype(float)
+    beyond = cbe.abs() > limit
+    if lo is not None and hi is not None:
+        lo = lo.reindex(v.index).astype(float)
+        hi = hi.reindex(v.index).astype(float)
+        have = lo.notna() & hi.notna()
+        beyond = beyond.where(~have, (lo > limit) | (hi < -limit))
+    out = pd.Series(np.where(beyond, CB_BEYOND, CB_WITHIN), index=v.index)
+    out[cbe.isna() | v['filled_HCO3'].astype(bool)] = CB_NA
+    return out
+
+
+INTERNAL_COLS = {CB_RING, CB_LABEL, 'Sample', 'Label', 'Color', 'Marker', 'Water type', 'Chadha field', 'Filled', 'Alkalinity from',
                  'HCO3, CO3 from', 'HCO3 is input', 'CO3 is input',
                  'TDS is measured', 'filled_pH', 'filled_Temp', 'filled_HCO3'}
 
