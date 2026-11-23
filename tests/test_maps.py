@@ -280,3 +280,57 @@ def test_fetch_basemap_orientation(monkeypatch):
     mid_r, mid_c = rows // 2, cols // 2
     assert img[mid_r, cols - 20, 0] > img[mid_r, 20, 0]      # east is redder
     assert img[rows - 20, mid_c, 1] > img[20, mid_c, 1]      # the bottom of the image is south
+
+
+def test_legend_depths_and_edges():
+    assert maps.parse_depths('10, 50,100 ; 200') == ([10.0, 50.0, 100.0, 200.0], '')
+    assert maps.parse_depths('') == ([], '')
+    vals, msg = maps.parse_depths('200, 10, x, -5, 50, 100, 300')
+    assert vals == [10.0, 50.0, 100.0, 200.0] and 'x' in msg and '-5' in msg and 'first 4' in msg
+    # a chosen depth beyond the data widens the size scale, so the legend marker is on the same scale
+    depth = pd.Series([10.0, 110.0])
+    _, narrow = maps.depth_sizes(depth, 30)
+    areas, wide = maps.depth_sizes(depth, 30, include=[10, 210])
+    assert float(wide(210)) == pytest.approx(30 * maps.SIZE_RANGE[1])
+    assert areas[1] < float(narrow(110))
+
+    pts, _ = example_points()
+    extent = maps.fit_extent(maps.data_extent(pts))
+    fig = maps.sample_map(pts, styles_for(pts), extent, by_depth=True, legend_depths=[10, 50, 100, 200],
+                          edge='0.50', edge_width=1.5)
+    texts = figure_texts(fig)
+    assert all(f'{d} m' in texts for d in (10, 50, 100, 200))
+    assert not any(t in texts for t in ('5 m', '133 m'))
+    ax = fig.axes[0]
+    widths = {float(c.get_linewidths()[0]) for c in ax.collections if len(c.get_offsets())}
+    assert widths == {1.5}
+    assert all(tuple(c.get_edgecolors()[0][:3]) == (0.5, 0.5, 0.5) for c in ax.collections if len(c.get_offsets()))
+    # the north arrow is a triangle marker, with no stick
+    assert any(l.get_marker() == '^' and l.get_markersize() == maps.NORTH_SIZE for l in ax.lines)
+    from matplotlib.patches import FancyArrowPatch
+    assert not ax.findobj(FancyArrowPatch)
+    plots.fig_png(fig, dpi=60)
+
+
+def test_three_layers():
+    pts, _ = example_points()
+    extent = maps.fit_extent(maps.data_extent(pts))
+    line = lambda dy: gpd.GeoDataFrame(geometry=[LineString([(132.4, -14.7 + dy), (133.0, -14.2 + dy)])], crs=4326)
+    layers = [dict(gdf=square(4326, 132.4, -14.7, 0.4), edge='#FCB711', face='#FCB711', alpha=0.25, width=1.2,
+                   label='Region'),
+              dict(gdf=line(0), edge='#0089D0', face='#0089D0', alpha=0.25, width=1.0, label='Rivers'),
+              dict(gdf=line(0.1), edge='#444444', face='#444444', alpha=0.25, width=0.8, label='Roads')]
+    fig = maps.sample_map(pts, styles_for(pts), extent, poly=layers)
+    texts = figure_texts(fig)
+    assert all(name in texts for name in ('Region', 'Rivers', 'Roads'))
+    assert maps.MAX_LAYERS == 3
+
+
+def test_badge_text():
+    pts, _ = example_points()
+    fig = maps.sample_map(pts, styles_for(pts), maps.fit_extent(maps.data_extent(pts)))
+    plots.add_badge(fig)
+    from matplotlib.offsetbox import TextArea
+    words = [t.get_text() for area in fig.findobj(TextArea) for t in area.findobj(lambda a: hasattr(a, 'get_text'))
+             if hasattr(t, 'get_text')]
+    assert 'Made using the Hydrochem Workbench' in words and not any('Irvine' in w for w in words)

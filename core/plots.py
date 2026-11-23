@@ -1386,14 +1386,14 @@ BADGE_PT = 14       # height of the app icon in the 'Made using' badge, in point
 
 
 def _badge_at(fig, x, y, transform):
-    # 'Made using HydroCHEM, Dylan Irvine' with the app icon, right-aligned at (x, y). Text only if the icon is missing
+    # 'Made using the Hydrochem Workbench' with the app icon, right-aligned at (x, y). Text only if the icon is missing
     if getattr(fig, '_badged', False):
         return
     try:
         img = mimage.imread(BADGE_ICON)
     except (FileNotFoundError, OSError):
         img = None
-    parts = [TextArea('Made using HydroCHEM, Dylan Irvine', textprops=dict(fontsize=6, color='0.5'))]
+    parts = [TextArea('Made using the Hydrochem Workbench', textprops=dict(fontsize=6, color='0.5'))]
     if img is not None:
         parts.append(OffsetImage(img, zoom=BADGE_PT / img.shape[0]))
     packed = HPacker(children=parts, align='center', pad=0, sep=3)

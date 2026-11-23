@@ -301,6 +301,12 @@ def test_map_view(tmp_path, monkeypatch):
     at.checkbox(key='opt_map_reverse').check().run()
     at.checkbox(key='opt_map_labels').check().run()
     at.slider(key='opt_map_size').set_value(60).run()
+    at.text_input(key='opt_map_legend_depths').set_value('10, 50, 100, 200, 300').run()
+    assert not at.exception and any('first 4' in w.value for w in at.warning)
+    at.text_input(key='opt_map_legend_depths').set_value('10, 50, 100').run()
+    at.slider(key='opt_map_edge_img').set_value(50).run()
+    at.slider(key='opt_map_edge_width').set_value(0.0).run()
+    assert not at.exception
     for corner in at.selectbox(key='opt_map_inset').options:
         at.selectbox(key='opt_map_inset').select(corner).run()
         assert not at.exception
@@ -385,23 +391,23 @@ def test_map_layers(tmp_path, monkeypatch):
     at.run()
     at.checkbox[0].check().run()
     at.session_state['map_towns'] = ('towns.csv (3 town(s))', maps.read_towns(io.BytesIO(maps.towns_template_bytes())))
-    at.session_state['map_poly_pending'] = (parts, 'zone.shp does not say what its coordinates are')
+    at.session_state['map_poly_0_pending'] = (parts, 'zone.shp does not say what its coordinates are')
     nt = maps.natural_earth()
     at.session_state['map_outline'] = ('nt.gpkg', nt[nt['name'] == 'Northern Territory'])
     at.radio[0].set_value('Map').run()
     assert not at.exception
     assert any('does not say what its coordinates are' in w.value for w in at.warning)
-    at.number_input(key='map_poly_epsg').set_value(28353).run()
-    at.button(key='map_poly_use').click().run()
+    at.number_input(key='map_poly_0_epsg').set_value(28353).run()
+    at.button(key='map_poly_0_use').click().run()
     assert not at.exception and len(at.error) == 0
-    info, gdf = at.session_state['map_poly']
+    info, gdf = at.session_state['map_poly_0']
     assert 'EPSG:28353' in info and abs(gdf.total_bounds[0] - 132.4) < 1e-3
-    at.color_picker(key='opt_map_poly_edge').pick('#000000').run()
-    at.slider(key='opt_map_poly_alpha').set_value(0.0).run()
-    at.text_input(key='opt_map_poly_label').set_value('Management zone').run()
+    at.color_picker(key='opt_map_poly0_edge').pick('#000000').run()
+    at.slider(key='opt_map_poly0_alpha').set_value(0.0).run()
+    at.text_input(key='opt_map_poly0_label').set_value('Management zone').run()
     assert not at.exception
-    at.button(key='map_poly_remove').click().run()
-    assert not at.exception and 'map_poly' not in at.session_state
+    at.button(key='map_poly_0_remove').click().run()
+    assert not at.exception and 'map_poly_0' not in at.session_state
 
 
 def test_map_uploads(tmp_path, monkeypatch):
@@ -428,9 +434,26 @@ def test_map_uploads(tmp_path, monkeypatch):
     at.radio[0].set_value('Map').run()
     at.file_uploader(key='map_towns_up_0').upload('towns.csv', maps.towns_template_bytes(), 'text/csv').run()
     assert not at.exception and at.session_state['map_towns'][0] == 'towns.csv (3 town(s))'
-    at.file_uploader(key='map_poly_up_0').upload('readme.geojson', b'{"type": "nothing"}').run()
-    assert not at.exception and len(at.error) == 1 and 'map_poly' not in at.session_state
-    at.file_uploader(key='map_poly_up_0').upload('zone.zip', buf.getvalue(), 'application/zip').run()
-    assert not at.exception and 'EPSG:28353' in at.session_state['map_poly'][0]
+    at.file_uploader(key='map_poly_0_up_0').upload('readme.geojson', b'{"type": "nothing"}').run()
+    assert not at.exception and len(at.error) == 1 and 'map_poly_0' not in at.session_state
+    at.file_uploader(key='map_poly_0_up_0').upload('zone.zip', buf.getvalue(), 'application/zip').run()
+    assert not at.exception and 'EPSG:28353' in at.session_state['map_poly_0'][0]
+    # a second and a third layer (lines), then the first is removed and the others stay where they are
+    from shapely.geometry import LineString
+    for k, name in ((1, 'rivers'), (2, 'roads')):
+        path = tmp_path / f'{name}.geojson'
+        gpd.GeoDataFrame(geometry=[LineString([(132.3, -14.8 + 0.1 * k), (133.0, -14.2)])], crs=4326).to_file(
+            path, driver='GeoJSON')
+        at.file_uploader(key=f'map_poly_{k}_up_0').upload(path.name, path.read_bytes()).run()
+        assert not at.exception and name in at.session_state[f'map_poly_{k}'][0]
+    at.text_input(key='opt_map_poly1_label').set_value('Rivers').run()
+    at.color_picker(key='opt_map_poly2_edge').pick('#444444').run()
+    assert not at.exception
+    assert not any(f.key.startswith('map_poly_') for f in at.get('file_uploader'))     # all three slots are full
+    at.button(key='map_poly_0_remove').click().run()
+    assert not at.exception and 'map_poly_0' not in at.session_state and 'map_poly_2' in at.session_state
+    at.radio[0].set_value('Export').run()
+    assert not at.exception
+    at.radio[0].set_value('Map').run()
     at.button(key='map_towns_remove').click().run()
     assert not at.exception and 'map_towns' not in at.session_state

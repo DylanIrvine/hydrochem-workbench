@@ -8,7 +8,7 @@
 
 # core/maps.py
 # sample location map: points by group (size by screen depth if wanted), satellite
-# imagery behind, towns, one polygon layer, a locator inset, scale bar and north arrow
+# imagery behind, towns, up to three polygon or line layers, a locator inset, scale bar and north arrow
 #
 # the map is drawn in longitude and latitude (EPSG:4326). geopandas and contextily
 # are imported inside the functions that need them, so the rest of the app does not
@@ -62,6 +62,9 @@ MAP_W = 10.4            # cm
 MAP_LEFT = 1.5          # cm
 RATIO = (0.45, 1.25)    # height / width of the map panel is kept in this range
 SIZE_RANGE = (0.4, 3.0)  # marker area of the smallest and largest depth, times the chosen size
+MAX_LEGEND_DEPTHS = 4
+MAX_LAYERS = 3           # polygon or line layers on the map
+NORTH_SIZE = 13          # north arrow triangle, points
 
 TOWN_COLS = ['Name', 'Lat', 'Lon']
 POLY_TYPES = ['zip', 'shp', 'shx', 'dbf', 'prj', 'cpg', 'gpkg', 'geojson', 'json', 'kml']
@@ -411,20 +414,46 @@ def scale_bar(ax, extent, corner, fg, bg):
 
 
 def north_arrow(ax, corner, fg, bg):
-    x, y1 = _corner_xy(corner, 0.06, 0.10 if corner.startswith('Top') else 0.24)
-    y0 = y1 - 0.13
-    ax.annotate('', xy=(x, y1), xytext=(x, y0), xycoords='axes fraction', zorder=25,
-                arrowprops=dict(arrowstyle='-|>', color=fg, lw=1.4, mutation_scale=11, shrinkA=0, shrinkB=0,
-                                path_effects=[pe.Stroke(linewidth=3.0, foreground=bg), pe.Normal()]))
-    ax.annotate('N', (x, y1), xycoords='axes fraction', xytext=(0, 2), textcoords='offset points',
-                ha='center', va='bottom', color=fg, fontsize=9, zorder=25, path_effects=_halo(bg))
+    # a triangle pointing up the page (north) with N above it
+    x, y = _corner_xy(corner, 0.06, 0.12 if corner.startswith('Top') else 0.20)
+    ax.plot([x], [y], transform=ax.transAxes, ls='', marker='^', ms=NORTH_SIZE, mfc=fg, mec=bg, mew=0.9,
+            zorder=25, clip_on=False)
+    ax.annotate('N', (x, y), xycoords='axes fraction', xytext=(0, 0.5 * NORTH_SIZE + 2),
+                textcoords='offset points', ha='center', va='bottom', color=fg, fontsize=10, zorder=25,
+                path_effects=_halo(bg))
 
 
-def depth_sizes(depth, size, reverse=False):
+def parse_depths(text):
+    # depths typed for the legend ('10, 50, 100'): up to MAX_LEGEND_DEPTHS numbers, sorted
+    # returns (list, message if something was left out)
+    parts = [p for p in str(text or '').replace(';', ',').replace(' ', ',').split(',') if p]
+    vals, bad = [], []
+    for p in parts:
+        try:
+            x = float(p)
+        except ValueError:
+            bad.append(p)
+            continue
+        if np.isfinite(x) and x >= 0 and x not in vals:
+            vals.append(x)
+        elif not (np.isfinite(x) and x >= 0):
+            bad.append(p)
+    msg = ''
+    if bad:
+        msg = 'Not used (not a depth): ' + ', '.join(bad) + '. '
+    if len(vals) > MAX_LEGEND_DEPTHS:
+        msg += f'Only the first {MAX_LEGEND_DEPTHS} depths are used.'
+        vals = vals[:MAX_LEGEND_DEPTHS]
+    return sorted(vals), msg.strip()
+
+
+def depth_sizes(depth, size, reverse=False, include=()):
     # marker area for each depth: the shallowest and deepest get SIZE_RANGE x size
+    # include: depths chosen for the legend, which widen the range if they lie outside the data
     # returns (areas, function from depth to area)
     d = depth.astype(float)
-    lo, hi = d.min(), d.max()
+    lo = min([d.min()] + list(include))
+    hi = max([d.max()] + list(include))
 
     def area(x):
         t = 0.5 if not np.isfinite(hi - lo) or hi == lo else (np.asarray(x, dtype=float) - lo) / (hi - lo)
@@ -507,14 +536,16 @@ def _draw_inset(fig, ax, extent, inset, map_h_cm):
 # %% the map
 def sample_map(pts, styles, extent, basemap=None, size=30.0, by_depth=False, reverse=False, labels=False,
                towns=None, poly=None, inset=None, scale_corner='Bottom right', north_corner='Top right',
-               credit=''):
+               credit='', legend_depths=None, edge=None, edge_width=0.5):
     # pts: Sample, Label, lat, lon, depth (from locations())
     # styles: {Label: (colour, marker)}
     # extent: (west, east, south, north), already through fit_extent()
     # basemap: (image, image extent) from fetch_basemap(), or None for a white background
     # towns: table with Name, Lat, Lon
-    # poly: dict(gdf, edge, face, alpha, width, label)
+    # poly: dict(gdf, edge, face, alpha, width, label), or a list of them (drawn in order, first at the bottom)
     # inset: dict(corner, factor, outline) or None
+    # legend_depths: depths (m) to show in the size legend, or None for automatic ones
+    # edge: colour of the marker edges (default white on imagery, black on white); edge_width in points
     w, e, s, n = extent
     lat0 = 0.5 * (s + n)
     k = _km_per_deg_lon(lat0) / 110.57
@@ -522,12 +553,13 @@ def sample_map(pts, styles, extent, basemap=None, size=30.0, by_depth=False, rev
     fig_h = map_h + 1.7
     dark = basemap is not None
     fg, bg = ('white', 'black') if dark else ('black', 'white')
-    edge = 'white' if dark else 'black'
+    if edge is None:
+        edge = 'white' if dark else 'black'
 
     inside = pts[(pts['lon'] >= w) & (pts['lon'] <= e) & (pts['lat'] >= s) & (pts['lat'] <= n)]
     use_depth = by_depth and inside['depth'].notna().any()
     if use_depth:
-        areas, area_of = depth_sizes(inside['depth'], size, reverse)
+        areas, area_of = depth_sizes(inside['depth'], size, reverse, include=legend_depths or ())
     else:
         areas = pd.Series(size, index=inside.index)
 
@@ -544,14 +576,16 @@ def sample_map(pts, styles, extent, basemap=None, size=30.0, by_depth=False, rev
             if len(ne):
                 ne.plot(ax=ax, facecolor='none', edgecolor='0.7', linewidth=0.4, aspect=None, zorder=1)
 
-        if poly is not None:
-            gdf = poly['gdf']
+        polys = [] if poly is None else [poly] if isinstance(poly, dict) else list(poly)
+        for k, layer in enumerate(polys):
+            gdf = layer['gdf']
             lines = gdf.geom_type.str.contains('Line')
             if (~lines).any():
-                gdf[~lines].plot(ax=ax, facecolor=mcolors.to_rgba(poly['face'], poly['alpha']),
-                                 edgecolor=poly['edge'], linewidth=poly['width'], aspect=None, zorder=5)
+                gdf[~lines].plot(ax=ax, facecolor=mcolors.to_rgba(layer['face'], layer['alpha']),
+                                 edgecolor=layer['edge'], linewidth=layer['width'], aspect=None, zorder=5 + 0.1 * k)
             if lines.any():
-                gdf[lines].plot(ax=ax, color=poly['edge'], linewidth=poly['width'], aspect=None, zorder=5)
+                gdf[lines].plot(ax=ax, color=layer['edge'], linewidth=layer['width'], aspect=None,
+                                zorder=5 + 0.1 * k)
 
         # largest first, so a small marker is not hidden under a big one at the same bore
         order = areas.sort_values(ascending=False).index
@@ -559,13 +593,13 @@ def sample_map(pts, styles, extent, basemap=None, size=30.0, by_depth=False, rev
             for i in order:
                 col, mk = styles[inside.at[i, 'Label']]
                 ax.scatter([inside.at[i, 'lon']], [inside.at[i, 'lat']], s=areas[i], marker=mk, color=col,
-                           edgecolors=edge, linewidths=0.5, alpha=0.9, zorder=10)
+                           edgecolors=edge, linewidths=edge_width, alpha=0.9, zorder=10)
         else:
             for lab, (col, mk) in styles.items():
                 g = inside[inside['Label'] == lab]
                 if len(g):
                     ax.scatter(g['lon'], g['lat'], s=areas[g.index], marker=mk, color=col, edgecolors=edge,
-                               linewidths=0.5, alpha=0.9, zorder=10)
+                               linewidths=edge_width, alpha=0.9, zorder=10)
         if labels:
             for i in inside.index:
                 ax.annotate(inside.at[i, 'Sample'], (inside.at[i, 'lon'], inside.at[i, 'lat']), xytext=(3, 3),
@@ -602,16 +636,18 @@ def sample_map(pts, styles, extent, basemap=None, size=30.0, by_depth=False, rev
 
         # legend to the right of the map: groups, then towns and the polygon
         used = [lab for lab in styles if (inside['Label'] == lab).any()]
-        handles = [Line2D([], [], ls='', marker=styles[lab][1], mfc=styles[lab][0], mec='black', mew=0.5, ms=5,
+        # legend markers keep a dark edge (a white one would not show on the page), at the chosen width
+        mec = edge if mcolors.to_rgb(edge)[0] < 0.6 else 'black'
+        handles = [Line2D([], [], ls='', marker=styles[lab][1], mfc=styles[lab][0], mec=mec, mew=edge_width, ms=5,
                           label=lab) for lab in used]
         if n_towns:
             handles.append(Line2D([], [], ls='', marker='s', mfc='black', mec='0.6', mew=0.6, ms=4, label='Town'))
-        if poly is not None:
-            if poly['gdf'].geom_type.str.contains('Line').all():
-                handles.append(Line2D([], [], color=poly['edge'], lw=poly['width'], label=poly['label']))
+        for layer in polys:
+            if layer['gdf'].geom_type.str.contains('Line').all():
+                handles.append(Line2D([], [], color=layer['edge'], lw=layer['width'], label=layer['label']))
             else:
-                handles.append(Patch(facecolor=mcolors.to_rgba(poly['face'], poly['alpha']), edgecolor=poly['edge'],
-                                     linewidth=poly['width'], label=poly['label']))
+                handles.append(Patch(facecolor=mcolors.to_rgba(layer['face'], layer['alpha']),
+                                     edgecolor=layer['edge'], linewidth=layer['width'], label=layer['label']))
         lx = (MAP_LEFT + MAP_W + 0.3) / FIG_W
         top = (1.3 + map_h) / fig_h
         leg = None
@@ -620,12 +656,13 @@ def sample_map(pts, styles, extent, basemap=None, size=30.0, by_depth=False, rev
                              borderaxespad=0)
         if use_depth:
             # marker sizes in the legend are the sizes on the map
-            vals = depth_legend_values(inside['depth'])
+            vals = list(legend_depths) if legend_depths else depth_legend_values(inside['depth'])
             biggest = math.sqrt(float(np.max(area_of(vals))))
-            dh = [Line2D([], [], ls='', marker='o', mfc='0.75', mec='black', mew=0.5,
+            dh = [Line2D([], [], ls='', marker='o', mfc='0.75', mec=mec, mew=edge_width,
                          ms=math.sqrt(float(area_of(val))), label=f'{val:g} m') for val in vals]
             if inside['depth'].isna().any():
-                dh.append(Line2D([], [], ls='', marker='o', mfc='white', mec='black', mew=0.5, ms=math.sqrt(size),
+                dh.append(Line2D([], [], ls='', marker='o', mfc='white', mec='black', mew=max(edge_width, 0.5),
+                                 ms=math.sqrt(size),
                                  label='No depth'))
             y = top
             if leg is not None:

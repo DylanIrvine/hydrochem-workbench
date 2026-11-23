@@ -32,7 +32,7 @@ from core import chem, guidelines, plots, uncertainty, usage, advanced, plots_ad
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.14.0'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.14.2'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -185,7 +185,7 @@ with st.expander('**Privacy and data handling**'):
         '- Your data are not sent to a third party. PHREEQC runs inside the app, not as an outside service.\n'
         '- Sample coordinates, site names or anything else in your spreadsheet are treated the '
         'same way: used for your plots, then gone. The results exist only in the files you download. '
-        'The same goes for a towns file or a polygon uploaded for the map.\n'
+        'The same goes for a towns file or polygon files uploaded for the map.\n'
         '- One exception, only if you open the Map view with satellite imagery as the background: the '
         'app asks an outside map server (Esri World Imagery) for the image tiles covering the map, so that '
         'server sees which area was requested, as a rectangle around your samples. It does not receive the sample '
@@ -1174,10 +1174,31 @@ MAP_DEFAULTS = {
     'opt_map_base': maps.IMAGERY, 'opt_map_size': 30, 'opt_map_depth': False, 'opt_map_reverse': False,
     'opt_map_labels': False, 'opt_map_margin': 15, 'opt_map_manual': False,
     'opt_map_scale': 'Bottom right', 'opt_map_north': 'Top right', 'opt_map_inset': 'Auto',
-    'opt_map_inset_factor': 12, 'opt_map_poly_edge': '#FCB711', 'opt_map_poly_face': '#FCB711',
-    'opt_map_poly_alpha': 0.25, 'opt_map_poly_width': 1.2, 'opt_map_poly_label': 'Polygon',
+    'opt_map_inset_factor': 12,
+    'opt_map_legend_depths': '', 'opt_map_edge_width': 0.5,
+    # marker edge, 0 (black) to 100 (white): one setting for each background
+    'opt_map_edge_img': 100, 'opt_map_edge_plain': 0,
 }
 INSET_CHOICES = ['Auto'] + maps.CORNERS + ['Off']
+# up to three polygon or line layers (e.g. a boundary, rivers, roads), each with its own style
+LAYER_COLOURS = ['#FCB711', '#0089D0', '#CC004C']
+for _k in range(maps.MAX_LAYERS):
+    MAP_DEFAULTS.update({f'opt_map_poly{_k}_edge': LAYER_COLOURS[_k], f'opt_map_poly{_k}_face': LAYER_COLOURS[_k],
+                         f'opt_map_poly{_k}_alpha': 0.25, f'opt_map_poly{_k}_width': 1.2,
+                         f'opt_map_poly{_k}_label': f'Layer {_k + 1}'})
+
+
+def map_layers():
+    # the loaded layers with their styles, in order
+    ss = st.session_state
+    out = []
+    for k in range(maps.MAX_LAYERS):
+        if ss.get(f'map_poly_{k}'):
+            out.append(dict(gdf=ss[f'map_poly_{k}'][1], file=ss[f'map_poly_{k}'][0],
+                            edge=mget(f'opt_map_poly{k}_edge'), face=mget(f'opt_map_poly{k}_face'),
+                            alpha=mget(f'opt_map_poly{k}_alpha'), width=mget(f'opt_map_poly{k}_width'),
+                            label=mget(f'opt_map_poly{k}_label') or f'Layer {k + 1}'))
+    return out
 
 
 def mget(key):
@@ -1186,6 +1207,10 @@ def mget(key):
 
 def mopt(key, options=None):
     return opt(key, MAP_DEFAULTS[key], options)
+
+
+def map_edge_key():
+    return 'opt_map_edge_img' if mget('opt_map_base') == maps.IMAGERY else 'opt_map_edge_plain'
 
 
 def map_points():
@@ -1249,11 +1274,7 @@ def build_map():
         else:
             credit = maps.attribution(maps.IMAGERY)
     towns = ss['map_towns'][1] if ss.get('map_towns') else None
-    poly = None
-    if ss.get('map_poly'):
-        poly = dict(gdf=ss['map_poly'][1], edge=mget('opt_map_poly_edge'), face=mget('opt_map_poly_face'),
-                    alpha=mget('opt_map_poly_alpha'), width=mget('opt_map_poly_width'),
-                    label=mget('opt_map_poly_label') or 'Polygon')
+    poly = map_layers() or None
     inset = None
     corner = mget('opt_map_inset')
     if corner != 'Off':
@@ -1262,11 +1283,14 @@ def build_map():
                                           towns=towns)
         inset = dict(corner=corner, factor=mget('opt_map_inset_factor'),
                      outline=ss['map_outline'][1] if ss.get('map_outline') else None)
+    # if the imagery could not be fetched the map is white, so the edge setting for white is used
+    edge_key = 'opt_map_edge_plain' if basemap is None else 'opt_map_edge_img'
     fig = maps.sample_map(pts, {lab: group_style[lab] for lab in shown}, extent, basemap=basemap,
                           size=mget('opt_map_size'), by_depth=mget('opt_map_depth'),
                           reverse=mget('opt_map_reverse'), labels=mget('opt_map_labels'), towns=towns, poly=poly,
                           inset=inset, scale_corner=mget('opt_map_scale'), north_corner=mget('opt_map_north'),
-                          credit=credit)
+                          credit=credit, legend_depths=maps.parse_depths(mget('opt_map_legend_depths'))[0] or None,
+                          edge=f'{mget(edge_key) / 100:.2f}', edge_width=mget('opt_map_edge_width'))
     return fig, notes, credit
 
 
@@ -1346,7 +1370,7 @@ if view == 'Map':
             st.info('None of the plotted groups has a sample with coordinates.')
     elif map_ready:
         st.write('Samples with a latitude and longitude, drawn with the colour and marker of their group. '
-                 'North is up. Open the panels below for the extent, towns, a polygon and the layout.')
+                 'North is up. Open the panels below for the extent, towns, polygons or lines, and the layout.')
         c1, c2 = st.columns(2)
         base = c1.selectbox('Background', maps.BASEMAPS, key=mopt('opt_map_base', maps.BASEMAPS))
         c2.slider('Marker size', 5, 150, key=mopt('opt_map_size'), step=5,
@@ -1360,6 +1384,21 @@ if view == 'Map':
         c2.checkbox('Shallow = large', key=mopt('opt_map_reverse'), disabled=not (by_depth and has_depth),
                     help='By default the deepest screen has the largest marker. Tick to turn that around.')
         c3.checkbox('Label the samples', key=mopt('opt_map_labels'))
+        if by_depth and has_depth:
+            d_text = st.text_input(f'Depths in the legend (m): up to {maps.MAX_LEGEND_DEPTHS}, separated by commas',
+                                   key=mopt('opt_map_legend_depths'), placeholder='e.g. 10, 50, 100, 200',
+                                   help='Leave blank for the shallowest and deepest screen with round values '
+                                        f"between them (here {pts['depth'].min():g} to {pts['depth'].max():g} m). "
+                                        'A depth outside that range widens the size scale to include it.')
+            d_msg = maps.parse_depths(d_text)[1]
+            if d_msg:
+                st.warning(d_msg)
+        c1, c2 = st.columns(2)
+        c1.slider('Marker edge: black (0) to white (100)', 0, 100, key=opt(map_edge_key(), MAP_DEFAULTS[map_edge_key()]),
+                  step=5, help='Shades of grey in between. Kept separately for the imagery and the white '
+                               'background. Legend markers keep a dark edge so they show on the page.')
+        c2.slider('Marker edge thickness (points)', 0.0, 2.0, key=mopt('opt_map_edge_width'), step=0.25,
+                  help='0 draws the markers with no edge.')
 
         with st.expander('**Extent and imagery detail**'):
             auto = maps.data_extent(pts, mget('opt_map_margin') / 100)
@@ -1405,21 +1444,30 @@ if view == 'Map':
                                file_name='hydrochem_workbench_towns_template.csv', mime='text/csv')
             layer_upload('map_towns', 'Upload the towns file', ['csv', 'xlsx'], _read_towns)
 
-        with st.expander('**Polygon**' + (' (loaded)' if st.session_state.get('map_poly') else '')):
-            st.write('One layer of polygons (or lines), for example a management zone or a catchment: a '
-                     'shapefile as a .zip or as its separate files (.shp, .shx, .dbf and .prj together), a '
-                     f'GeoPackage, GeoJSON or KML, up to {maps.MAX_UPLOAD_MB} MB. It is converted to latitude '
-                     'and longitude from whatever coordinate reference system the file states.')
-            layer_upload('map_poly', 'Upload the polygon file(s)', maps.POLY_TYPES, maps.read_vector)
-            if st.session_state.get('map_poly'):
-                c1, c2, c3 = st.columns(3)
-                c1.color_picker('Edge colour', key=mopt('opt_map_poly_edge'))
-                c2.color_picker('Fill colour', key=mopt('opt_map_poly_face'))
-                c3.slider('Fill opacity (alpha)', 0.0, 1.0, key=mopt('opt_map_poly_alpha'), step=0.05,
-                          help='0 is no fill (outline only), 1 is solid.')
-                c1, c2 = st.columns(2)
-                c1.slider('Edge width', 0.2, 4.0, key=mopt('opt_map_poly_width'), step=0.2)
-                c2.text_input('Name in the legend', key=mopt('opt_map_poly_label'))
+        n_layers = len(map_layers())
+        with st.expander('**Polygons and lines**' + (f' ({n_layers} loaded)' if n_layers else '')):
+            st.write(f'Up to {maps.MAX_LAYERS} layers of polygons or lines, for example a region boundary, rivers '
+                     'and roads. Each is a shapefile as a .zip or as its separate files (.shp, .shx, .dbf and '
+                     f'.prj together), a GeoPackage, GeoJSON or KML, up to {maps.MAX_UPLOAD_MB} MB, and is '
+                     'converted to latitude and longitude from whatever coordinate reference system the file '
+                     'states. Layer 1 is drawn first, with the others on top. Lines take the edge colour.')
+            loaded = [bool(st.session_state.get(f'map_poly_{k}')) for k in range(maps.MAX_LAYERS)]
+            for k in range(maps.MAX_LAYERS):
+                # the loaded layers, and one empty slot after them
+                if not (loaded[k] or all(loaded[:k])):
+                    continue
+                st.markdown(f'**Layer {k + 1}**')
+                layer_upload(f'map_poly_{k}', f'Upload the file(s) for layer {k + 1}', maps.POLY_TYPES,
+                             maps.read_vector)
+                if loaded[k]:
+                    c1, c2, c3 = st.columns(3)
+                    c1.color_picker('Edge colour', key=mopt(f'opt_map_poly{k}_edge'))
+                    c2.color_picker('Fill colour', key=mopt(f'opt_map_poly{k}_face'))
+                    c3.slider('Fill opacity (alpha)', 0.0, 1.0, key=mopt(f'opt_map_poly{k}_alpha'), step=0.05,
+                              help='0 is no fill (outline only), 1 is solid. Not used for lines.')
+                    c1, c2 = st.columns(2)
+                    c1.slider('Edge width', 0.2, 4.0, key=mopt(f'opt_map_poly{k}_width'), step=0.2)
+                    c2.text_input('Name in the legend', key=mopt(f'opt_map_poly{k}_label'))
 
         with st.expander('**Scale bar, north arrow and locator inset**'):
             c1, c2, c3 = st.columns(3)
@@ -1515,12 +1563,16 @@ if view == 'Export':
                 ('Map', 'Marker size', mget('opt_map_size')),
                 ('Map', 'Size by screen depth', ('Yes, shallow = large' if mget('opt_map_reverse') else
                                                  'Yes, deep = large') if mget('opt_map_depth') else 'No'),
+                ('Map', 'Depths in the legend (m)', (mget('opt_map_legend_depths') or 'Automatic')
+                 if mget('opt_map_depth') else ''),
+                ('Map', 'Marker edge', f"{mget(map_edge_key())} on a scale of 0 (black) to 100 (white), "
+                                       f"{mget('opt_map_edge_width'):g} pt"),
                 ('Map', 'Sample labels', 'Yes' if mget('opt_map_labels') else 'No'),
                 ('Map', 'Towns', ss['map_towns'][0] if ss.get('map_towns') else 'None'),
-                ('Map', 'Polygon', ss['map_poly'][0] if ss.get('map_poly') else 'None'),
-                ('Map', 'Polygon style', f"edge {mget('opt_map_poly_edge')}, fill {mget('opt_map_poly_face')}, "
-                                         f"alpha {mget('opt_map_poly_alpha'):g}, width {mget('opt_map_poly_width'):g}"
-                 if ss.get('map_poly') else ''),
+                ('Map', 'Polygon and line layers', len(map_layers()) or 'None'),
+                *[('Map', f"Layer: {m['label']}", f"{m['file']}; edge {m['edge']}, fill {m['face']}, "
+                                                  f"alpha {m['alpha']:g}, width {m['width']:g}")
+                  for m in map_layers()],
                 ('Map', 'Scale bar, north arrow', f"{mget('opt_map_scale')}, {mget('opt_map_north')}"),
                 ('Map', 'Locator inset', mget('opt_map_inset') + (
                     '' if mget('opt_map_inset') == 'Off' else

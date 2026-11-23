@@ -121,10 +121,13 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
     the Map view draws the samples with their group colour and marker over
     satellite imagery (Esri World Imagery) or a white background, with a scale
     bar, north arrow and a locator inset. Marker size can follow `Screen_depth`
-    (m below surface, optional), with the sizes in the legend. Optional extras:
-    a csv of towns (Name, Lat, Lon; template in the app), one polygon layer
-    (shapefile as a .zip or its separate files, GeoPackage, GeoJSON or KML) with
-    a chosen edge colour, fill colour and opacity, and your own outline for the
+    (m below surface, optional), with the sizes in the legend (automatic depths, or
+    up to four of your own). The marker edge can be any grey from black to white,
+    at a chosen thickness. Optional extras:
+    a csv of towns (Name, Lat, Lon; template in the app), up to three polygon or line
+    layers, such as a boundary, rivers and roads (shapefile as a .zip or its
+    separate files, GeoPackage, GeoJSON or KML), each with a chosen edge colour,
+    fill colour and opacity, and your own outline for the
     inset. Polygon files are converted to latitude and longitude from whatever
     coordinate reference system they state; a shapefile with no .prj asks for
     its EPSG code. The imagery zoom level starts at a value that suits the
@@ -203,7 +206,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D.J. (2026). Hydrochem Workbench (version 0.14.0)
+Irvine, D.J. (2026). Hydrochem Workbench (version 0.14.2)
 [Web application]. Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).
