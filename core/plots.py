@@ -1415,6 +1415,11 @@ def add_badge(fig):
     box = fig.get_tightbbox(fig.canvas.get_renderer())
     width, height = fig.get_size_inches()
     below = fig.transFigure + mtransforms.ScaledTranslation(0, -(BADGE_PT / 2 + 4) / 72, fig.dpi_scale_trans)
+    # a credit line (the map's imagery attribution) goes in the same strip, on the left
+    credit = getattr(fig, '_credit', None)
+    if credit:
+        fig.text(box.x0 / width, box.y0 / height, credit, transform=below, ha='left', va='center',
+                 fontsize=5.5, color='0.4', linespacing=1.15)
     _badge_at(fig, box.x1 / width, box.y0 / height, below)
     fig._badged = True
 

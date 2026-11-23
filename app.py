@@ -11,7 +11,7 @@
 #
 # to run: streamlit run app.py
 #
-# calculations are in core/chem.py, figures in core/plots.py
+# calculations are in core/chem.py, figures in core/plots.py, the map in core/maps.py
 
 # %%
 import hashlib
@@ -27,12 +27,12 @@ import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
 
 import core
-from core import chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced
+from core import chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced, maps
 
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.13.0'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.14.0'   # keep the same as VERSION in core/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -40,7 +40,7 @@ APP_VERSION = '0.13.0'   # keep the same as VERSION in core/__init__.py
 if getattr(core, 'VERSION', None) != APP_VERSION:
     import importlib
     importlib.reload(core)
-    for _m in (chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced):
+    for _m in (chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced, maps):
         importlib.reload(_m)
 
 _record_use, _usage_status = usage.increment, usage.status
@@ -100,7 +100,8 @@ st.write(
     'What comes back: charge balance, water type, saturation indices and pCO2, a comparison with '
     'Australian, WHO and FAO (irrigation) water quality guidelines with a bar chart against any of them, a Piper diagram, the '
     'classical diagrams, a gallery of diagnostic ion, ratio and saturation-index plots with '
-    'reference lines, and a builder for any plot the gallery does not have. The database is '
+    'reference lines, a builder for any plot the gallery does not have, and, if the samples have '
+    'coordinates, a location map over satellite imagery. The database is '
     'phreeqc.dat, so results are for fresh water; saline samples are flagged.\n\n'
     'Optionally, the measurement uncertainty of every input (laboratory uncertainty, values below the '
     'limit of reporting, field probe accuracy) can be carried through the whole calculation by Monte '
@@ -181,9 +182,15 @@ with st.expander('**Privacy and data handling**'):
         '- The file you upload is read into memory for your session, processed, and discarded when '
         'you close or refresh the page. The app does not save it to a database or to any permanent '
         'storage.\n'
-        '- Nothing is sent to a third party. PHREEQC runs inside the app, not as an outside service.\n'
+        '- Your data are not sent to a third party. PHREEQC runs inside the app, not as an outside service.\n'
         '- Sample coordinates, site names or anything else in your spreadsheet are treated the '
-        'same way: used for your plots, then gone. The results exist only in the files you download.\n\n'
+        'same way: used for your plots, then gone. The results exist only in the files you download. '
+        'The same goes for a towns file or a polygon uploaded for the map.\n'
+        '- One exception, only if you open the Map view with satellite imagery as the background: the '
+        'app asks an outside map server (Esri World Imagery) for the image tiles covering the map, so that '
+        'server sees which area was requested, as a rectangle around your samples. It does not receive the sample '
+        'locations themselves, their names or any chemistry. Choose the white background and no request '
+        'is made.\n\n'
         '**You**\n'
         '- No login, and no record kept by this app of who you are or where you are. The app does '
         'not log IP addresses or locations.\n'
@@ -219,6 +226,9 @@ with st.expander('**How to cite and references**'):
         'https://doi.org/10.1111/gwat.13185\n\n'
         'The Piper diagram here is adapted from WQChartPy. The Durov, Gibbs, Chadha and HFE-D '
         'diagrams are drawn by WQChartPy, with plain-text labels and the uncertainty added by this app.\n\n'
+        '**Map**\n\n'
+        'Satellite imagery: Esri World Imagery, credited below each map. Inset outlines: Natural Earth '
+        '(naturalearthdata.com, public domain).\n\n'
         '**Original diagram references**\n\n'
         'Piper, A.M. (1944). A graphic procedure in the geochemical interpretation of '
         'water-analyses. Eos, Transactions American Geophysical Union, 25(6), 914-928. '
@@ -604,7 +614,7 @@ st.subheader('Checks, plots and analyses')
 st.caption('Choose a view. Each one uses the groups ticked above.')
 # radio buttons and not st.tabs, as tabs redraw every figure on every click
 VIEWS = ['Data and checks', 'Guidelines', 'Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot',
-         'Mixing', 'PCA', 'Clusters', 'Group comparison', 'Export']
+         'Map', 'Mixing', 'PCA', 'Clusters', 'Group comparison', 'Export']
 view = st.radio('View', VIEWS, horizontal=True, label_visibility='collapsed', key=opt('opt_view', VIEWS[0], VIEWS))
 
 # %% view: data
@@ -919,7 +929,10 @@ def multi_warnings(w, cols, n_used):
 
 
 ION_LABEL = lambda c: A.analyte_of(c) or c
-extra_numeric = [c for c in (base['settings']['extra_cols'] if base else []) if c in numeric_choices]
+# coordinates and screen depth are not tracers
+_loc = set(chem.location_columns(v.columns).values())
+extra_numeric = [c for c in (base['settings']['extra_cols'] if base else [])
+                 if c in numeric_choices and c not in _loc]
 mix_options = A.member_options(v)
 _groups = list(pd.unique(v['Label']))
 
@@ -1155,6 +1168,286 @@ if view == 'Group comparison':
                            'values (grey: fewer than 4). Correlation across groups often reflects the groups '
                            'themselves (e.g. fresh against saline) rather than a process within any one of them.')
 
+# %% view: map
+# every map setting is read from session_state, so the Export view can draw the same map
+MAP_DEFAULTS = {
+    'opt_map_base': maps.IMAGERY, 'opt_map_size': 30, 'opt_map_depth': False, 'opt_map_reverse': False,
+    'opt_map_labels': False, 'opt_map_margin': 15, 'opt_map_manual': False,
+    'opt_map_scale': 'Bottom right', 'opt_map_north': 'Top right', 'opt_map_inset': 'Auto',
+    'opt_map_inset_factor': 12, 'opt_map_poly_edge': '#FCB711', 'opt_map_poly_face': '#FCB711',
+    'opt_map_poly_alpha': 0.25, 'opt_map_poly_width': 1.2, 'opt_map_poly_label': 'Polygon',
+}
+INSET_CHOICES = ['Auto'] + maps.CORNERS + ['Off']
+
+
+def mget(key):
+    return st.session_state.get(key, MAP_DEFAULTS[key])
+
+
+def mopt(key, options=None):
+    return opt(key, MAP_DEFAULTS[key], options)
+
+
+def map_points():
+    # the samples of the plotted groups that have coordinates
+    pts, notes = maps.locations(v)
+    return pts[pts['Label'].isin(shown)], notes
+
+
+def map_extent(pts):
+    ss = st.session_state
+    if mget('opt_map_manual') and all(k in ss for k in ('opt_map_w', 'opt_map_e', 'opt_map_s', 'opt_map_n')):
+        w, e, s, n = ss['opt_map_w'], ss['opt_map_e'], ss['opt_map_s'], ss['opt_map_n']
+        if e > w and n > s:
+            return maps.fit_extent((w, e, s, n))
+    return maps.fit_extent(maps.data_extent(pts, mget('opt_map_margin') / 100))
+
+
+def map_zoom(extent):
+    # (zoom in use, default, lowest, highest, tiles at each zoom, key of the slider)
+    default, lo, hi, counts = maps.zoom_choices(extent)
+    key = f'opt_map_zoom_{default}_{hi}'
+    zoom = st.session_state.get(key, default)
+    return (zoom if lo <= zoom <= hi else default), default, lo, hi, counts, key
+
+
+def map_basemap(extent, zoom):
+    # imagery for the map, kept for the session until the extent or zoom changes
+    # returns (basemap or None, message if it could not be fetched)
+    ss = st.session_state
+    key = (tuple(round(float(x), 5) for x in extent), zoom)
+    kept = ss.get('map_tiles')
+    if kept is not None and kept[0] == key:
+        return kept[1], None
+    if ss.get('map_tiles_failed', (None, ''))[0] == key:
+        return None, ss['map_tiles_failed'][1]
+    try:
+        with st.spinner('Fetching the imagery ...'):
+            basemap = maps.fetch_basemap(extent, zoom)
+    except Exception as exc:
+        msg = f'{type(exc).__name__}: {exc}'[:300]
+        ss['map_tiles_failed'] = (key, msg)
+        return None, msg
+    ss['map_tiles'] = (key, basemap)
+    ss.pop('map_tiles_failed', None)
+    return basemap, None
+
+
+def build_map():
+    # returns (figure or None, notes, credit line)
+    ss = st.session_state
+    pts, notes = map_points()
+    if pts.empty:
+        return None, notes, ''
+    extent = map_extent(pts)
+    basemap, credit = None, ''
+    if mget('opt_map_base') == maps.IMAGERY:
+        basemap, failed = map_basemap(extent, map_zoom(extent)[0])
+        if basemap is None:
+            notes = notes + ['The imagery could not be fetched, so the map has a white background '
+                             f'({failed}).']
+        else:
+            credit = maps.attribution(maps.IMAGERY)
+    towns = ss['map_towns'][1] if ss.get('map_towns') else None
+    poly = None
+    if ss.get('map_poly'):
+        poly = dict(gdf=ss['map_poly'][1], edge=mget('opt_map_poly_edge'), face=mget('opt_map_poly_face'),
+                    alpha=mget('opt_map_poly_alpha'), width=mget('opt_map_poly_width'),
+                    label=mget('opt_map_poly_label') or 'Polygon')
+    inset = None
+    corner = mget('opt_map_inset')
+    if corner != 'Off':
+        if corner == 'Auto':
+            corner = maps.emptiest_corner(pts, extent, taken=(mget('opt_map_scale'), mget('opt_map_north')),
+                                          towns=towns)
+        inset = dict(corner=corner, factor=mget('opt_map_inset_factor'),
+                     outline=ss['map_outline'][1] if ss.get('map_outline') else None)
+    fig = maps.sample_map(pts, {lab: group_style[lab] for lab in shown}, extent, basemap=basemap,
+                          size=mget('opt_map_size'), by_depth=mget('opt_map_depth'),
+                          reverse=mget('opt_map_reverse'), labels=mget('opt_map_labels'), towns=towns, poly=poly,
+                          inset=inset, scale_corner=mget('opt_map_scale'), north_corner=mget('opt_map_north'),
+                          credit=credit)
+    return fig, notes, credit
+
+
+def layer_upload(slot, label, types, reader, help=None):
+    # one uploaded map layer kept in session_state[slot] as (description, data). A file with no
+    # coordinate reference system waits in slot + '_pending' until the user gives an EPSG code
+    ss = st.session_state
+    ss.setdefault(slot + '_n', 0)
+    if ss.get(slot):
+        st.markdown(f'**Loaded:** {ss[slot][0]}')
+        if st.button('Remove', key=slot + '_remove'):
+            ss.pop(slot)
+            st.rerun()
+        return
+    pending = ss.get(slot + '_pending')
+    if pending:
+        st.warning(pending[1])
+        epsg = st.number_input('EPSG code of the file (e.g. 28353 for GDA94 / MGA zone 53, 7853 for GDA2020 / '
+                               'MGA zone 53, 4283 for GDA94 latitude and longitude)', min_value=1024,
+                               max_value=99999, value=4326, step=1, key=slot + '_epsg')
+        c1, c2 = st.columns(2)
+        if c1.button('Use this EPSG code', key=slot + '_use'):
+            try:
+                ss[slot] = tuple(reversed(reader(pending[0], epsg=int(epsg))))
+            except maps.MapError as exc:
+                st.error(str(exc))
+            else:
+                ss.pop(slot + '_pending')
+                st.rerun()
+        if c2.button('Cancel', key=slot + '_cancel'):
+            ss.pop(slot + '_pending')
+            st.rerun()
+        return
+    multi = len(types) > 2
+    up = st.file_uploader(label, type=types, accept_multiple_files=multi, key=f'{slot}_up_{ss[slot + "_n"]}',
+                          help=help)
+    files = up if multi else ([up] if up is not None else [])
+    if files:
+        kept = [maps.Upload(f.name, f.getvalue()) for f in files]
+        try:
+            out = reader(kept) if multi else reader(io.BytesIO(kept[0].data), kept[0].name)
+        except maps.NeedsCRS as exc:
+            ss[slot + '_pending'] = (kept, str(exc))
+        except maps.MapError as exc:
+            st.error(str(exc))
+            return
+        except Exception as exc:
+            st.error(f'Could not read that file: {exc}')
+            return
+        else:
+            ss[slot] = tuple(reversed(out)) if multi else out
+        ss[slot + '_n'] += 1
+        st.rerun()
+
+
+def _read_towns(buf, name):
+    buf.name = name
+    towns = maps.read_towns(buf)
+    return f'{name} ({len(towns)} town(s))', towns
+
+
+if view == 'Map':
+    st.subheader('Sample map')
+    try:
+        import geopandas   # noqa: F401
+        import contextily  # noqa: F401
+        map_ready = True
+    except ImportError:
+        map_ready = False
+        st.error('The map needs the geopandas and contextily packages, which are not installed here. '
+                 'Run "pip install -r requirements.txt".')
+    pts, map_notes = map_points() if map_ready else (pd.DataFrame(), [])
+    if map_ready and pts.empty:
+        for note in map_notes:
+            st.info(note)
+        if not map_notes or 'no Lat and Lon' not in map_notes[0]:
+            st.info('None of the plotted groups has a sample with coordinates.')
+    elif map_ready:
+        st.write('Samples with a latitude and longitude, drawn with the colour and marker of their group. '
+                 'North is up. Open the panels below for the extent, towns, a polygon and the layout.')
+        c1, c2 = st.columns(2)
+        base = c1.selectbox('Background', maps.BASEMAPS, key=mopt('opt_map_base', maps.BASEMAPS))
+        c2.slider('Marker size', 5, 150, key=mopt('opt_map_size'), step=5,
+                  help='Marker area in points squared, as in matplotlib. With "Size by screen depth" this is the '
+                       'middle of the range.')
+        has_depth = bool(pts['depth'].notna().any())
+        c1, c2, c3 = st.columns(3)
+        by_depth = c1.checkbox('Size by screen depth', key=mopt('opt_map_depth'), disabled=not has_depth,
+                               help='Needs the Screen_depth column (m below surface). Samples with no depth '
+                                    'keep the chosen marker size and are listed in the legend as "No depth".')
+        c2.checkbox('Shallow = large', key=mopt('opt_map_reverse'), disabled=not (by_depth and has_depth),
+                    help='By default the deepest screen has the largest marker. Tick to turn that around.')
+        c3.checkbox('Label the samples', key=mopt('opt_map_labels'))
+
+        with st.expander('**Extent and imagery detail**'):
+            auto = maps.data_extent(pts, mget('opt_map_margin') / 100)
+            manual = st.checkbox('Set the extent by hand', key=mopt('opt_map_manual'))
+            if not manual:
+                st.slider('Margin around the samples (% of their spread)', 0, 200, key=mopt('opt_map_margin'),
+                          step=5)
+            else:
+                c1, c2, c3, c4 = st.columns(4)
+                for col, key, lab, val in ((c1, 'opt_map_w', 'West', auto[0]), (c2, 'opt_map_e', 'East', auto[1]),
+                                           (c3, 'opt_map_s', 'South', auto[2]), (c4, 'opt_map_n', 'North', auto[3])):
+                    col.number_input(lab, min_value=-180.0, max_value=180.0, step=0.05, format='%.4f',
+                                     key=opt(key, round(float(val), 4)))
+                ss = st.session_state
+                if not (ss['opt_map_e'] > ss['opt_map_w'] and ss['opt_map_n'] > ss['opt_map_s']):
+                    st.warning('East has to be greater than West, and North greater than South. Using the '
+                               'extent of the samples instead.')
+            extent = map_extent(pts)
+            st.caption(f'Map extent: {extent[0]:.4f} to {extent[1]:.4f} E, {extent[2]:.4f} to {extent[3]:.4f} N '
+                       f'(about {maps.extent_width_km(extent):.3g} km wide). The extent is widened where needed '
+                       'so the map is not a thin strip.')
+            if base == maps.IMAGERY:
+                zoom, z_default, z_lo, z_hi, counts, z_key = map_zoom(extent)
+                if z_hi > z_lo:
+                    zoom = st.slider('Imagery zoom level', z_lo, z_hi, key=opt(z_key, z_default),
+                                     help='Each step up doubles the detail and needs about four times as many '
+                                          f'image tiles. The starting value ({z_default}) suits this extent. '
+                                          f'The app does not go above {maps.MAX_TILES} tiles.')
+                st.caption(f'Zoom {zoom}: {counts[zoom]} tile(s) to download.')
+                if counts[zoom] > maps.WARN_TILES:
+                    st.warning(f'{counts[zoom]} tiles. High zoom levels take a long time to download and draw, '
+                               'and the map is redrawn each time a setting changes. Lower the zoom while '
+                               'setting the map up, and raise it at the end.')
+                if st.session_state.get('map_tiles_failed') and st.button('Try the imagery again'):
+                    st.session_state.pop('map_tiles_failed')
+                    st.rerun()
+
+        towns_kept = st.session_state.get('map_towns')
+        with st.expander('**Towns**' + (f' ({len(towns_kept[1])} loaded)' if towns_kept else '')):
+            st.write('A csv with the columns Name, Lat and Lon (decimal degrees). Towns inside the map extent '
+                     'are drawn as black squares with their name.')
+            st.download_button('Download the towns template', maps.towns_template_bytes(),
+                               file_name='hydrochem_workbench_towns_template.csv', mime='text/csv')
+            layer_upload('map_towns', 'Upload the towns file', ['csv', 'xlsx'], _read_towns)
+
+        with st.expander('**Polygon**' + (' (loaded)' if st.session_state.get('map_poly') else '')):
+            st.write('One layer of polygons (or lines), for example a management zone or a catchment: a '
+                     'shapefile as a .zip or as its separate files (.shp, .shx, .dbf and .prj together), a '
+                     f'GeoPackage, GeoJSON or KML, up to {maps.MAX_UPLOAD_MB} MB. It is converted to latitude '
+                     'and longitude from whatever coordinate reference system the file states.')
+            layer_upload('map_poly', 'Upload the polygon file(s)', maps.POLY_TYPES, maps.read_vector)
+            if st.session_state.get('map_poly'):
+                c1, c2, c3 = st.columns(3)
+                c1.color_picker('Edge colour', key=mopt('opt_map_poly_edge'))
+                c2.color_picker('Fill colour', key=mopt('opt_map_poly_face'))
+                c3.slider('Fill opacity (alpha)', 0.0, 1.0, key=mopt('opt_map_poly_alpha'), step=0.05,
+                          help='0 is no fill (outline only), 1 is solid.')
+                c1, c2 = st.columns(2)
+                c1.slider('Edge width', 0.2, 4.0, key=mopt('opt_map_poly_width'), step=0.2)
+                c2.text_input('Name in the legend', key=mopt('opt_map_poly_label'))
+
+        with st.expander('**Scale bar, north arrow and locator inset**'):
+            c1, c2, c3 = st.columns(3)
+            c1.selectbox('Scale bar', maps.CORNERS, key=mopt('opt_map_scale', maps.CORNERS))
+            c2.selectbox('North arrow', maps.CORNERS, key=mopt('opt_map_north', maps.CORNERS))
+            inset_at = c3.selectbox('Locator inset', INSET_CHOICES, key=mopt('opt_map_inset', INSET_CHOICES),
+                                    help='A small map showing where the main map is. Auto puts it in the '
+                                         'corner with the fewest samples.')
+            if inset_at != 'Off':
+                if not st.session_state.get('map_outline'):
+                    st.slider('Inset width (times the width of the map)', 3, 100, key=mopt('opt_map_inset_factor'),
+                              help='The inset shows country and state outlines from Natural Earth (1:50m).')
+                st.write('To use your own outline in the inset instead (a country, state or catchment), '
+                         'upload it here. The inset then covers that outline.')
+                layer_upload('map_outline', 'Upload an outline for the inset', maps.POLY_TYPES, maps.read_vector)
+
+        fig, map_notes, credit = build_map()
+        for note in map_notes:
+            st.info(note)
+        if fig is not None:
+            show(fig, 'sample_map', 'dl_map')
+            caption = 'The scale bar is exact at the latitude of the middle of the map.'
+            if credit:
+                caption += (' The imagery credit is in a strip below the map, so it can be cropped off if the '
+                            f'credit is given in the figure caption instead: "{credit}". The imagery shows the '
+                            'surface on the date it was captured, which differs from place to place.')
+            st.caption(caption)
+
 # %% view: export
 if view == 'Export':
     st.subheader('Results table')
@@ -1207,6 +1500,35 @@ if view == 'Export':
         ('Guidelines', 'Sets', guide_txt),
         ('Guidelines', 'Bar chart', f"{ss.get('opt_gchart_var', '')}: {ss.get('opt_gchart_rule', '')}"),
     ]
+    # the map, if its view was opened
+    if 'opt_map_base' in ss:
+        m_pts, _ = map_points()
+        rows += [('Map', 'Samples with coordinates (plotted groups)', len(m_pts))]
+        if len(m_pts):
+            m_ext = map_extent(m_pts)
+            rows += [
+                ('Map', 'Extent (W, E, S, N; decimal degrees)', ', '.join(f'{x:.4f}' for x in m_ext)),
+                ('Map', 'Extent set by', 'Hand' if mget('opt_map_manual') else
+                 f"Samples, with a {mget('opt_map_margin')} % margin"),
+                ('Map', 'Background', mget('opt_map_base')),
+                ('Map', 'Imagery zoom level', map_zoom(m_ext)[0] if mget('opt_map_base') == maps.IMAGERY else ''),
+                ('Map', 'Marker size', mget('opt_map_size')),
+                ('Map', 'Size by screen depth', ('Yes, shallow = large' if mget('opt_map_reverse') else
+                                                 'Yes, deep = large') if mget('opt_map_depth') else 'No'),
+                ('Map', 'Sample labels', 'Yes' if mget('opt_map_labels') else 'No'),
+                ('Map', 'Towns', ss['map_towns'][0] if ss.get('map_towns') else 'None'),
+                ('Map', 'Polygon', ss['map_poly'][0] if ss.get('map_poly') else 'None'),
+                ('Map', 'Polygon style', f"edge {mget('opt_map_poly_edge')}, fill {mget('opt_map_poly_face')}, "
+                                         f"alpha {mget('opt_map_poly_alpha'):g}, width {mget('opt_map_poly_width'):g}"
+                 if ss.get('map_poly') else ''),
+                ('Map', 'Scale bar, north arrow', f"{mget('opt_map_scale')}, {mget('opt_map_north')}"),
+                ('Map', 'Locator inset', mget('opt_map_inset') + (
+                    '' if mget('opt_map_inset') == 'Off' else
+                    f"; outline: {ss['map_outline'][0]}" if ss.get('map_outline') else
+                    f"; Natural Earth outlines, {mget('opt_map_inset_factor')} x the map width")),
+            ]
+    else:
+        rows.append(('Map', 'Included', 'No (view not opened)'))
     # the further analyses, each only if its view was opened (so its choices were made)
     ran = {'Mixing': 'opt_mix_tracers' in ss, 'PCA': 'opt_pca_vars' in ss, 'Clusters': 'opt_hca_vars' in ss,
            'Group comparison': 'opt_cmp_vars' in ss}
@@ -1296,7 +1618,7 @@ if view == 'Export':
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     st.caption('Every derived variable, saturation index and flag for all samples (including any '
                'groups not plotted). The Settings sheet records every option used (units, below-LOR, '
-               'missing values, groups, plot options, guidelines), with the group colours and markers '
+               'missing values, groups, plot options, guidelines, the map), with the group colours and markers '
                'and any replaced below-LOR values on their own sheets, so the run can be reproduced. '
                'The Group means sheet has the mean of each analyte for each group, and Group mean counts '
                'the number of values behind each mean. '
@@ -1308,7 +1630,8 @@ if view == 'Export':
                'The figure zip has every figure the app draws, for the plotted groups only and with the '
                'options chosen on each view, in folders: classical (Piper, Schoeller, Stiff, Durov, '
                'Gibbs, Chadha, HFE-D), gallery, custom plots (the custom plot and the guideline bar '
-               'chart) and further analyses (from the views that have been opened). File names start with '
+               'chart), map (if the Map view has been opened) and further analyses (from the views that '
+               'have been opened). File names start with '
                'the dataset name.')
 
     st.subheader('All figures')
@@ -1378,6 +1701,15 @@ if view == 'Export':
                     highlight=ss.get('opt_gchart_hlcol', '#000000') if ss.get('opt_gchart_hl') else None,
                     line_colour=ss.get('opt_gchart_linecol', '#222222'),
                     log=ss.get('opt_gchart_log', False), sort=ss.get('opt_gchart_sort', False), unc=mc))
+            # the map, as last set on its view
+            if 'opt_map_base' in ss:
+                try:
+                    m_fig, m_notes, _ = build_map()
+                except Exception as exc:
+                    m_fig, m_notes = None, [f'{type(exc).__name__}: {exc}']
+                if m_fig is not None:
+                    add('map/sample_map.png', m_fig)
+                notes.extend(f'Map: {note}' for note in m_notes)
             # the further analyses, as last set on their views
             fa = 'further analyses/'
             if ran['Mixing']:

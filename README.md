@@ -27,6 +27,7 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    or mmol/L) can be given instead and PHREEQC works from DIC and pH. Nitrate
    and ammonium can be as the ion or as N, phosphate as PO4 or as P. Any extra
    numeric column (depth, isotopes) is carried through and can be plotted.
+   `Lat`, `Lon` and `Screen_depth` are optional and used for the map.
 2. **Missing values.** Missing pH, temperature and alkalinity are filled (dataset
    mean, a fixed value, or for alkalinity the charge-balance value). Filled samples
    are drawn hollow, but only on plots the fill actually affects. Values below
@@ -116,11 +117,30 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    and keeps every setting (units, below-LOR, missing values, plot options,
    group colours and markers, guidelines), so several sites, or an edited sheet,
    can be run the same way.
+10. **Map.** If the template has `Lat` and `Lon` (decimal degrees, optional),
+    the Map view draws the samples with their group colour and marker over
+    satellite imagery (Esri World Imagery) or a white background, with a scale
+    bar, north arrow and a locator inset. Marker size can follow `Screen_depth`
+    (m below surface, optional), with the sizes in the legend. Optional extras:
+    a csv of towns (Name, Lat, Lon; template in the app), one polygon layer
+    (shapefile as a .zip or its separate files, GeoPackage, GeoJSON or KML) with
+    a chosen edge colour, fill colour and opacity, and your own outline for the
+    inset. Polygon files are converted to latitude and longitude from whatever
+    coordinate reference system they state; a shapefile with no .prj asks for
+    its EPSG code. The imagery zoom level starts at a value that suits the
+    extent and is capped at 100 tiles. The imagery credit is drawn in a strip
+    below the map, so it can be cropped off and given in the caption instead.
+    If the imagery cannot be fetched the map is drawn on white.
 
 ## Privacy
 
 The app keeps an uploaded dataset in memory for the browser session only and
-never writes it to disk. The one thing it records is a running total of
+never writes it to disk. With satellite imagery chosen on the Map view, the app
+asks Esri's tile server for the tiles that cover the map, so that server sees
+the rectangle requested (not the sample locations or any data). The image is
+held in memory for the session, not written to disk. With the white background
+nothing is requested. A polygon upload is unpacked to a temporary folder to be read and
+deleted straight away. The one thing the app records is a running total of
 sessions that processed data (`core/usage.py`). For that total to survive a
 restart on Streamlit Cloud, add Upstash Redis secrets in either layout:
 
@@ -141,6 +161,8 @@ usage statistics.
     core/guidelines.py  guideline values and the comparison
     core/gibbs_fields.py  outline of the Gibbs envelope (from WQChartPy)
     core/plots.py     all figures
+    core/maps.py      the sample map: coordinates, towns, polygon files, imagery, figure
+    core/data/        country and state outlines for the map inset (Natural Earth)
     core/advanced.py      mixing, PCA, clusters and group tests (no Streamlit)
     core/plots_advanced.py  their figures
     core/uncertainty.py  Monte Carlo uncertainty analysis and its default inputs
@@ -159,7 +181,16 @@ usage statistics.
   fixed TDS axis (0 to 4000 mg/L).
 - Total N and total P are not in the template, so those guideline values are
   not checked. State and site-specific guideline values are not included.
-- The bundled example data are synthetic.
+- The bundled example data are synthetic, including the sample locations.
+- The map is drawn in longitude and latitude, not in a projected coordinate
+  system. The scale bar is exact at the latitude of the middle of the map, which
+  is fine for a study area but not for a map spanning many degrees of latitude.
+  A map that crosses the 180 degree meridian is not handled.
+- The satellite imagery comes from an outside server (Esri World Imagery) and is
+  subject to Esri's terms of use, which require attribution. Check those terms
+  before using a map with imagery commercially. The capture date of the imagery
+  is not known to the app.
+- Town names are not moved to avoid each other or the samples.
 
 ## Licence
 
@@ -172,7 +203,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D.J. (2026). Hydrochem Workbench (version 0.13.0)
+Irvine, D.J. (2026). Hydrochem Workbench (version 0.14.0)
 [Web application]. Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).
@@ -185,5 +216,12 @@ Please also cite PHREEQC and WQChartPy (below).
 - **phreeqpython** (Apache-2.0), Vitens. Python wrapper for PHREEQC.
 - **PHREEQC** and `phreeqc.dat`, Parkhurst and Appelo, U.S. Geological Survey
   (public domain).
+- **Esri World Imagery**, the satellite imagery behind the map. Fetched from
+  Esri's server when a map is drawn (not part of this repository) and credited
+  on the figure.
+- **Natural Earth** (public domain), 1:50m country and state outlines for the
+  map inset, in `core/data/natural_earth_50m.gpkg` with coordinates rounded to
+  0.01 degrees.
+- GeoPandas, contextily and pyproj (BSD-3-Clause/MIT) for the map.
 - Streamlit (Apache-2.0), pandas and NumPy (BSD-3-Clause), Matplotlib
   (Matplotlib licence, BSD-style), openpyxl (MIT).

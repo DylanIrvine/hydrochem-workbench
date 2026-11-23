@@ -51,6 +51,22 @@ CATIONS = [a for a, (_, z, _) in ANALYTES.items() if z > 0]
 ANIONS = [a for a, (_, z, _) in ANALYTES.items() if z < 0]
 
 ID_COLS = ['Sample', 'Label']
+# optional, for the map: decimal degrees (south and west negative) and the depth
+# of the bore screen in m below surface
+LOC_COLS = ['Lat', 'Lon', 'Screen_depth']
+# other spellings that are read as the same thing (compared in lower case)
+LOC_ALIASES = {
+    'Lat': ['lat', 'latitude', 'lat_dd', 'latitude_dd'],
+    'Lon': ['lon', 'long', 'lng', 'longitude', 'lon_dd', 'long_dd', 'longitude_dd'],
+    'Screen_depth': ['screen_depth', 'screen depth', 'screen_depth_m', 'screen depth (m)', 'depth', 'depth_m',
+                     'depth (m)'],
+}
+
+
+def location_columns(columns):
+    # which column holds Lat, Lon and Screen_depth, by the names above. None if not there
+    lower = {str(c).strip().lower(): c for c in columns}
+    return {k: next((lower[a] for a in names if a in lower), None) for k, names in LOC_ALIASES.items()}
 FIELD_COLS = ['pH', 'Temp', 'EC', 'TDS']
 # alkalinity as reported by most labs, always in mg/L as CaCO3
 ALK_COLS = ['Total_Alk_CaCO3', 'Bicarb_Alk_CaCO3', 'Carb_Alk_CaCO3']
@@ -61,7 +77,7 @@ STYLE_COLS = ['Color', 'Marker']
 # calculates them from alkalinity (or DIC) and pH
 _ions = [a for a in ANALYTES if a not in ('HCO3', 'CO3')]
 _k = _ions.index('Cl')
-TEMPLATE_COLS = (ID_COLS + FIELD_COLS + _ions[:_k] + ALK_COLS + [DIC_COL] + ['HCO3', 'CO3'] + _ions[_k:]
+TEMPLATE_COLS = (ID_COLS + LOC_COLS + FIELD_COLS + _ions[:_k] + ALK_COLS + [DIC_COL] + ['HCO3', 'CO3'] + _ions[_k:]
                  + STYLE_COLS)
 
 UNITS = ['mg/L', 'mmol/L', 'meq/L']
@@ -106,7 +122,7 @@ def template_bytes():
     # xlsx template: Data sheet + Notes sheet
     example = example_data().head(3)
     notes = pd.DataFrame({'Column': [
-        'Sample', 'Label', 'pH', 'Temp', 'EC', 'TDS',
+        'Sample', 'Label', 'Lat', 'Lon', 'Screen_depth', 'pH', 'Temp', 'EC', 'TDS',
         'Ca, Mg, Na, K, Cl, SO4 ...',
         'ALKALINITY', 'Total_Alk_CaCO3', 'Bicarb_Alk_CaCO3', 'Carb_Alk_CaCO3', 'DIC', '',
         'HCO3', 'CO3',
@@ -115,6 +131,9 @@ def template_bytes():
         'What goes in it': [
             'Unique sample name. Required.',
             'Group used for colours and legends (aquifer, site, campaign). Optional.',
+            'Latitude in decimal degrees, WGS84 or GDA94/GDA2020 (south is negative, e.g. -14.465). Optional, used for the map only.',
+            'Longitude in decimal degrees (west is negative, e.g. 132.264). Optional, used for the map only.',
+            'Depth of the bore screen in m below surface (one value, e.g. the middle of the screen). Optional. Can set the marker size on the map; leave blank for surface water.',
             'Field pH if you have it, otherwise lab pH.',
             'Water temperature, degrees C.',
             'Electrical conductivity, uS/cm. Optional, used for plotting only.',
@@ -212,6 +231,17 @@ def example_data():
     df.loc[~lab, ['HCO3', 'CO3']] = np.nan
     df['Color'] = ''
     df['Marker'] = ''
+    # made-up locations and screen depths for the map, one cluster for each group.
+    # A separate generator, so the chemistry above does not change
+    loc = np.random.default_rng(11)
+    centres = {'Carbonate': (-14.62, 132.48, 20, 80), 'Sandstone': (-14.30, 132.62, 40, 150),
+               'Saline': (-14.52, 132.95, 5, 30)}
+    for name, (lat0, lon0, d0, d1) in centres.items():
+        g = df['Label'].str.startswith(name)
+        df.loc[g, 'Lat'] = (lat0 + loc.normal(0, 0.06, g.sum())).round(4)
+        df.loc[g, 'Lon'] = (lon0 + loc.normal(0, 0.07, g.sum())).round(4)
+        df.loc[g, 'Screen_depth'] = loc.uniform(d0, d1, g.sum()).round(0)
+    df.loc[24, 'Screen_depth'] = np.nan    # one sample with no depth
     return df[TEMPLATE_COLS]
 
 

@@ -274,3 +274,163 @@ def test_large_dataset_warning(tmp_path, monkeypatch):
     for view in ['Mixing', 'PCA', 'Clusters', 'Group comparison']:
         at.radio(key='opt_view').set_value(view).run()
         assert not at.exception
+
+
+def test_map_view(tmp_path, monkeypatch):
+    # the Map view on the example data, with a made-up image in place of the imagery download
+    import numpy as np
+    from core import maps
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    calls = []
+
+    def fake_basemap(extent, zoom):
+        calls.append(zoom)
+        return np.full((120, 160, 4), 120, dtype=np.uint8), extent
+
+    monkeypatch.setattr(maps, 'fetch_basemap', fake_basemap)
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.checkbox[0].check().run()
+    at.radio[0].set_value('Map').run()
+    assert not at.exception and len(at.error) == 0
+    assert len(calls) == 1
+    assert any(b.label == 'Download the towns template' for b in at.get('download_button'))
+    assert any('Esri' in c.value for c in at.caption)
+    # a change of style does not download the imagery again
+    at.checkbox(key='opt_map_depth').check().run()
+    at.checkbox(key='opt_map_reverse').check().run()
+    at.checkbox(key='opt_map_labels').check().run()
+    at.slider(key='opt_map_size').set_value(60).run()
+    for corner in at.selectbox(key='opt_map_inset').options:
+        at.selectbox(key='opt_map_inset').select(corner).run()
+        assert not at.exception
+    assert len(calls) == 1
+    # a higher zoom does, and warns
+    zoom = [s for s in at.slider if s.label == 'Imagery zoom level'][0]
+    zoom.set_value(zoom.max).run()
+    assert not at.exception and len(calls) == 2 and calls[-1] == zoom.max
+    assert any('tiles' in w.value for w in at.warning)
+    # extent by hand
+    at.checkbox(key='opt_map_manual').check().run()
+    at.number_input(key='opt_map_w').set_value(132.0).run()
+    at.number_input(key='opt_map_e').set_value(131.0).run()     # east of west: falls back, with a warning
+    assert not at.exception and any('East has to be greater' in w.value for w in at.warning)
+    at.number_input(key='opt_map_e').set_value(133.5).run()
+    assert not at.exception
+    # white background: nothing is downloaded
+    n = len(calls)
+    at.selectbox(key='opt_map_base').select(maps.PLAIN).run()
+    assert not at.exception and len(calls) == n
+    assert not any('Esri' in c.value for c in at.caption)
+    # the map is in the figure zip and its settings are in the results
+    at.radio[0].set_value('Export').run()
+    [b for b in at.button if b.label == 'Build a zip of every figure'][0].click().run()
+    assert not at.exception
+    assert 'map/sample_map.png' in at.session_state['zip_contents']
+
+
+def test_map_view_when_imagery_fails(tmp_path, monkeypatch):
+    # no connection to the map server: a white map and a note, and no retry on every rerun
+    from core import maps
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    calls = []
+
+    def no_basemap(extent, zoom):
+        calls.append(zoom)
+        raise ConnectionError('no route to the map server')
+
+    monkeypatch.setattr(maps, 'fetch_basemap', no_basemap)
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.checkbox[0].check().run()
+    at.radio[0].set_value('Map').run()
+    assert not at.exception
+    assert any('could not be fetched' in i.value for i in at.info)
+    at.checkbox(key='opt_map_labels').check().run()
+    assert len(calls) == 1
+    [b for b in at.button if b.label == 'Try the imagery again'][0].click().run()
+    assert not at.exception and len(calls) == 2
+
+
+def test_map_view_without_coordinates(tmp_path, monkeypatch):
+    from core import chem
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    plain = chem.example_data().drop(columns=chem.LOC_COLS)
+    monkeypatch.setattr(chem, 'example_data', lambda: plain)
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.checkbox[0].check().run()
+    at.radio[0].set_value('Map').run()
+    assert not at.exception
+    assert any('no Lat and Lon' in i.value for i in at.info)
+
+
+def test_map_layers(tmp_path, monkeypatch):
+    # towns, a polygon and an inset outline, and a shapefile with no .prj waiting for its EPSG code
+    import io
+    import os
+    import numpy as np
+    import geopandas as gpd
+    from shapely.geometry import Polygon
+    from core import maps
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    monkeypatch.setattr(maps, 'fetch_basemap', lambda extent, zoom: (np.full((120, 160, 4), 120, dtype=np.uint8), extent))
+    zone = gpd.GeoDataFrame(geometry=[Polygon([(132.4, -14.7), (132.8, -14.7), (132.8, -14.3), (132.4, -14.3)])],
+                            crs=4326)
+    zone.to_crs(28353).to_file(tmp_path / 'zone.shp')
+    parts = [maps.Upload(n, (tmp_path / n).read_bytes()) for n in os.listdir(tmp_path)
+             if n.startswith('zone.') and not n.endswith('.prj')]
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.checkbox[0].check().run()
+    at.session_state['map_towns'] = ('towns.csv (3 town(s))', maps.read_towns(io.BytesIO(maps.towns_template_bytes())))
+    at.session_state['map_poly_pending'] = (parts, 'zone.shp does not say what its coordinates are')
+    nt = maps.natural_earth()
+    at.session_state['map_outline'] = ('nt.gpkg', nt[nt['name'] == 'Northern Territory'])
+    at.radio[0].set_value('Map').run()
+    assert not at.exception
+    assert any('does not say what its coordinates are' in w.value for w in at.warning)
+    at.number_input(key='map_poly_epsg').set_value(28353).run()
+    at.button(key='map_poly_use').click().run()
+    assert not at.exception and len(at.error) == 0
+    info, gdf = at.session_state['map_poly']
+    assert 'EPSG:28353' in info and abs(gdf.total_bounds[0] - 132.4) < 1e-3
+    at.color_picker(key='opt_map_poly_edge').pick('#000000').run()
+    at.slider(key='opt_map_poly_alpha').set_value(0.0).run()
+    at.text_input(key='opt_map_poly_label').set_value('Management zone').run()
+    assert not at.exception
+    at.button(key='map_poly_remove').click().run()
+    assert not at.exception and 'map_poly' not in at.session_state
+
+
+def test_map_uploads(tmp_path, monkeypatch):
+    # the uploaders themselves: a towns csv, a zipped shapefile, and a file that is not a layer
+    import io
+    import zipfile
+    import numpy as np
+    import geopandas as gpd
+    from shapely.geometry import Polygon
+    from core import maps
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    monkeypatch.setattr(maps, 'fetch_basemap', lambda extent, zoom: (np.full((120, 160, 4), 120, dtype=np.uint8), extent))
+    zone = gpd.GeoDataFrame(geometry=[Polygon([(132.4, -14.7), (132.8, -14.7), (132.8, -14.3), (132.4, -14.3)])],
+                            crs=4326)
+    zone.to_crs(28353).to_file(tmp_path / 'zone.shp')
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w') as z:
+        for p in tmp_path.glob('zone.*'):
+            z.write(p, p.name)
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.checkbox[0].check().run()
+    at.radio[0].set_value('Map').run()
+    at.file_uploader(key='map_towns_up_0').upload('towns.csv', maps.towns_template_bytes(), 'text/csv').run()
+    assert not at.exception and at.session_state['map_towns'][0] == 'towns.csv (3 town(s))'
+    at.file_uploader(key='map_poly_up_0').upload('readme.geojson', b'{"type": "nothing"}').run()
+    assert not at.exception and len(at.error) == 1 and 'map_poly' not in at.session_state
+    at.file_uploader(key='map_poly_up_0').upload('zone.zip', buf.getvalue(), 'application/zip').run()
+    assert not at.exception and 'EPSG:28353' in at.session_state['map_poly'][0]
+    at.button(key='map_towns_remove').click().run()
+    assert not at.exception and 'map_towns' not in at.session_state

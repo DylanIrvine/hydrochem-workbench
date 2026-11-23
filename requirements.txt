@@ -8,3 +8,8 @@ openpyxl>=3.1
 phreeqpython>=1.5.5
 wqchartpy>=0.1.10
 upstash-redis>=1.1
+# the map
+geopandas>=1.0
+contextily>=1.6
+pyproj>=3.6
+mercantile>=1.2
