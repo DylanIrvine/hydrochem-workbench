@@ -6,7 +6,7 @@
 # Foundation, either version 3 of the License, or (at your option) any later
 # version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
 
-# core/guidelines.py
+# hydrochem_workbench/guidelines.py
 # Water quality guideline values (Australian, WHO and FAO) and the comparison
 # against them.
 # All values are in the table below so they are easy to check and update.

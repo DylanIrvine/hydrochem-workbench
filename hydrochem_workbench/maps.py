@@ -6,7 +6,7 @@
 # Foundation, either version 3 of the License, or (at your option) any later
 # version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
 
-# core/maps.py
+# hydrochem_workbench/maps.py
 # sample location map: points by group (size by screen depth if wanted), satellite
 # imagery behind, towns, up to three polygon or line layers, a locator inset, scale bar and north arrow
 #
@@ -14,7 +14,7 @@
 # are imported inside the functions that need them, so the rest of the app does not
 # load them
 #
-# core/data/natural_earth_50m.gpkg: country and state outlines from Natural Earth
+# hydrochem_workbench/data/natural_earth_50m.gpkg: country and state outlines from Natural Earth
 # (1:50m, public domain, naturalearthdata.com), coordinates rounded to 0.01 degrees
 
 # %%
@@ -36,7 +36,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
-from core import chem, plots
+from hydrochem_workbench import chem, plots
 
 CM = plots.CM
 

@@ -1,0 +1,44 @@
+# for installing hydrochem_workbench as a Python package (pip install .)
+# The Streamlit app does not need this file: on Streamlit Cloud it runs from the
+# repository with requirements.txt
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hydrochem-workbench"
+dynamic = ["version"]
+description = "Hydrochemistry plots, PHREEQC saturation indices, uncertainty and a sample map from a spreadsheet of water chemistry"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Dylan J. Irvine" }]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+    "scipy>=1.11",
+    "openpyxl>=3.1",
+    "phreeqpython>=1.5.5",
+    "wqchartpy>=0.1.10",
+]
+
+[project.optional-dependencies]
+# the sample map
+map = ["geopandas>=1.0", "contextily>=1.6", "pyproj>=3.6", "mercantile>=1.2"]
+# the Streamlit app
+app = ["streamlit>=1.50", "upstash-redis>=1.1"]
+test = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://hydrochem-workbench.streamlit.app/"
+Repository = "https://github.com/DylanIrvine/hydrochem-workbench"
+
+[tool.setuptools]
+packages = ["hydrochem_workbench"]
+
+[tool.setuptools.package-data]
+hydrochem_workbench = ["data/*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "hydrochem_workbench.VERSION" }

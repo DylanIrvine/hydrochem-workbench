@@ -6,7 +6,7 @@
 # Foundation, either version 3 of the License, or (at your option) any later
 # version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
 
-# core/uncertainty.py
+# hydrochem_workbench/uncertainty.py
 # Monte Carlo propagation of measurement uncertainty through the whole calculation
 # (unit conversion, fills, PHREEQC, derived variables), after JCGM 101:2008
 #
@@ -25,7 +25,7 @@
 import numpy as np
 import pandas as pd
 
-from core import chem
+from hydrochem_workbench import chem
 
 # percentiles of the reported interval (90 %)
 P_LO, P_HI = 5.0, 95.0

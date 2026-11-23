@@ -8,7 +8,7 @@
 #
 # Taken from HydroSTITCH, with the key names changed.
 
-# core/usage.py
+# hydrochem_workbench/usage.py
 # usage counter. Uses Upstash Redis if a url and token are given, otherwise a
 # local json file (.run_count.json), which resets when Streamlit Cloud restarts.
 # If Redis is configured but a call fails, nothing is counted (no fall back to the

@@ -1,9 +1,9 @@
-# tests for core/advanced.py (mixing, PCA, clusters, group tests)
+# tests for hydrochem_workbench/advanced.py (mixing, PCA, clusters, group tests)
 import numpy as np
 import pandas as pd
 import pytest
 
-from core import advanced as A
+from hydrochem_workbench import advanced as A
 
 
 def frame(rows, label='A'):

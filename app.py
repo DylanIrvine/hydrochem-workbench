@@ -11,7 +11,9 @@
 #
 # to run: streamlit run app.py
 #
-# calculations are in core/chem.py, figures in core/plots.py, the map in core/maps.py
+# calculations are in hydrochem_workbench/chem.py, figures in hydrochem_workbench/plots.py, the map in
+# hydrochem_workbench/maps.py. hydrochem_workbench/workflow.py strings the steps together, for the app
+# and for scripts
 
 # %%
 import hashlib
@@ -26,31 +28,32 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
 
-import core
-from core import chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced, maps
+import hydrochem_workbench
+from hydrochem_workbench import (chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced, maps,
+                                 workflow)
 
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.15.0'   # keep the same as VERSION in core/__init__.py
+APP_VERSION = '0.16.0'   # keep the same as VERSION in hydrochem_workbench/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
 # reload them
-if getattr(core, 'VERSION', None) != APP_VERSION:
+if getattr(hydrochem_workbench, 'VERSION', None) != APP_VERSION:
     import importlib
-    importlib.reload(core)
-    for _m in (chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced, maps):
+    importlib.reload(hydrochem_workbench)
+    for _m in (chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced, maps, workflow):
         importlib.reload(_m)
 
 _record_use, _usage_status = usage.increment, usage.status
 A, PA = advanced, plots_advanced
 
-PANELS_PER_PAGE = 6
+PANELS_PER_PAGE = workflow.PANELS_PER_PAGE
 DEFAULT_PH = 7.0
 DEFAULT_TEMP = 25.0
 DEFAULT_ALK = 100.0   # mg/L as CaCO3
-MAX_STIFF = 24
+MAX_STIFF = workflow.MAX_STIFF
 
 # theme (dark, red) is set in .streamlit/config.toml
 st.set_page_config(page_title=APP_NAME, page_icon='logo/HydroCHEM_icon.png', layout='centered')
@@ -111,7 +114,7 @@ st.write(
 
 # %% usage counter
 # counts sessions that process a dataset. Uses Upstash Redis if the secrets
-# are set, otherwise a local file that resets when the app restarts. See core/usage.py
+# are set, otherwise a local file that resets when the app restarts. See hydrochem_workbench/usage.py
 # Takes either layout used across the apps:
 #   [redis] rest_url / rest_token   (HydroSTITCH)
 #   [upstash] url / token           (HydroSILO, HydroPOINT, HydroCAPTURE)
@@ -293,8 +296,7 @@ with st.expander('**How to cite and references**'):
 @st.cache_resource
 def get_phreeqc():
     # load the database once
-    import phreeqpython
-    return phreeqpython.PhreeqPython(database='phreeqc.dat')
+    return workflow.get_phreeqc()
 
 
 def process(raw, unit, n_as_n, p_as_p, dic_unit, rules, lor):
@@ -308,21 +310,11 @@ def process(raw, unit, n_as_n, p_as_p, dic_unit, rules, lor):
     if cached is not None and cached[0] == key:
         return cached[1]
 
+    # the calculation itself is workflow.process(), the same one a script uses
     with st.spinner('Running PHREEQC ...'):
-        fraction, lor_text, lor_neg = lor
-        raw, replaced = chem.below_lor(raw, fraction, text=lor_text, negative=lor_neg, rows=True)
-        below = {(r.Row, r.Column): float(r.LOR) for r in replaced.itertuples()}
-        replaced = replaced.drop(columns='Row')
-        df, dropped, extra_cols, problems = chem.clean(raw)
-        # duplicates are flagged but still run
-        if any(not p.startswith('Duplicate') for p in problems):
-            out = (None, dropped, None, problems, replaced, None)
-        else:
-            settings = dict(unit=unit, n_as_n=n_as_n, p_as_p=p_as_p, dic_unit=dic_unit, rules=rules,
-                            extra_cols=tuple(extra_cols))
-            v, errors = chem.derive(df, get_phreeqc(), **settings)
-            out = (v, dropped, errors, problems, replaced,
-                   dict(key=key, df=df, below=below, settings=settings))
+        r = workflow.process(raw, get_phreeqc(), unit, n_as_n, p_as_p, dic_unit, rules, lor)
+        base = None if r['base'] is None else dict(r['base'], key=key)
+        out = (r['table'], r['dropped'], r['errors'], r['problems'], r['replaced'], base)
     st.session_state['result'] = (key, out)
     return out
 
@@ -633,19 +625,13 @@ if use_unc:
         st.warning(f"PHREEQC did not converge in {mc['fails']} sample-realisation(s); those are left out of "
                    'the intervals.')
 
-v = v.copy()
-v['Color'] = v['Label'].map(lambda l: group_style[l][0])
-v['Marker'] = v['Label'].map(lambda l: group_style[l][1])
+v, _ = workflow.style_groups(v, group_style)
 
 # %% charge balance check
 cb_unc = mc is not None and cb_basis == CB_BASES[1]
-v[chem.CB_COL] = chem.charge_balance_check(v, cb_limit, mc['lo']['CBE (%)'] if cb_unc else None,
-                                           mc['hi']['CBE (%)'] if cb_unc else None)
-cb_beyond = v[chem.CB_COL] == chem.CB_BEYOND
-cb_exclude = cb_beyond & (cb_action == CB_ACTIONS[1])
-cb_text = (f'Charge balance beyond {cb_limit:g} %' + (', allowing for uncertainty' if cb_unc else ''))
-v[chem.CB_RING] = [cb_col if (b and cb_action == CB_ACTIONS[0]) else '' for b in cb_beyond]
-v[chem.CB_LABEL] = cb_text
+cb_beyond, cb_exclude, cb_text = workflow.mark_charge_balance(
+    v, cb_limit, dict(zip(CB_ACTIONS, (workflow.MARK, workflow.EXCLUDE, workflow.NO_ACTION)))[cb_action],
+    workflow.INTERVAL if cb_unc else workflow.VALUE, mc, cb_col)
 if cb_beyond.any():
     done = {CB_ACTIONS[0]: 'They are marked with a ring on the plots.',
             CB_ACTIONS[1]: 'They are left off every plot and out of the group means and the further analyses, '

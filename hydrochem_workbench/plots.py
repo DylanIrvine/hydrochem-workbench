@@ -12,7 +12,7 @@
 # Modified 2024 (D. Irvine: coloured fields, water-type labels) and 2026
 # (returns a Figure, grouped drawing, hollow markers for filled inputs).
 
-# core/plots.py
+# hydrochem_workbench/plots.py
 # all of the figures
 #
 #   piper()            Piper diagram
@@ -48,8 +48,8 @@ from pathlib import Path
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
-from core.chem import SEAWATER_MMOL, hollow_mask, CB_RING, CB_LABEL
-from core import gibbs_fields
+from hydrochem_workbench.chem import SEAWATER_MMOL, hollow_mask, CB_RING, CB_LABEL
+from hydrochem_workbench import gibbs_fields
 
 CM = 1.0 / 2.54
 
@@ -1442,7 +1442,7 @@ def _badge_at(fig, x, y, transform):
                                   frameon=False, pad=0, annotation_clip=False))
 
 
-BADGE_ICON = Path(__file__).resolve().parents[1] / 'logo' / 'HydroCHEM_badge.png'
+BADGE_ICON = Path(__file__).resolve().parent / 'data' / 'HydroCHEM_badge.png'
 
 
 def add_badge(fig):

@@ -10,7 +10,7 @@
 # (triangle_piper.py), Copyright (C) the WQChartPy authors (Yang et al., 2022),
 # GPL-3.0: https://github.com/jyangfsu/WQChartPy. Modified 2026.
 
-# core/chem.py
+# hydrochem_workbench/chem.py
 # template, reading the upload, unit conversion, filling gaps, PHREEQC,
 # and the table of derived variables used by the plots
 

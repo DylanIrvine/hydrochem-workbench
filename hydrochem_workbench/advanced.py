@@ -6,7 +6,7 @@
 # Foundation, either version 3 of the License, or (at your option) any later
 # version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
 
-# core/advanced.py
+# hydrochem_workbench/advanced.py
 # the further analyses: end-member mixing with ion deviations, PCA, hierarchical
 # clustering and group comparisons. No Streamlit in here.
 #
@@ -20,7 +20,7 @@
 import numpy as np
 import pandas as pd
 
-from core.chem import ANALYTES, hollow_mask
+from hydrochem_workbench.chem import ANALYTES, hollow_mask
 
 LARGE_DATASET = 200          # above this many samples the app warns that plots may be slow or crowded
 LOR_SHARE_WARN = 0.25        # variables with more than this share below the LOR are left out by default

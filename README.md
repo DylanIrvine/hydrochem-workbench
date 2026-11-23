@@ -48,7 +48,7 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    guidelines (Ayers and Westcot 1985), rated as no, slight to moderate, or
    severe restriction on use, including infiltration from SAR and EC together.
    A bar chart plots any parameter against any of these guideline values, with
-   user-chosen colours. All the numbers are in `core/guidelines.py` with their
+   user-chosen colours. All the numbers are in `hydrochem_workbench/guidelines.py` with their
    sources. It is a screening comparison, not a compliance assessment.
 5. **Plots.**
    - Piper, in the coloured-field style from `PiperScript.py`
@@ -84,7 +84,7 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    NO3, Br and F from laboratory control sample recoveries in 19 quality-control
    reports from an Australian laboratory (surface water and groundwater, 2021 to
    2026); pH, temperature and EC from the YSI ProDSS specifications (rectangular,
-   a/sqrt(3)); the rest are placeholders. `core/uncertainty.py` has the method.
+   a/sqrt(3)); the rest are placeholders. `hydrochem_workbench/uncertainty.py` has the method.
 7. **Export.** Results table with every derived variable, a Settings sheet with
    every option used, the group colours and markers, and any replaced below-LOR
    values, and the mean of each analyte for each group (with the number of
@@ -153,7 +153,7 @@ the rectangle requested (not the sample locations or any data). The image is
 held in memory for the session, not written to disk. With the white background
 nothing is requested. A polygon upload is unpacked to a temporary folder to be read and
 deleted straight away. The one thing the app records is a running total of
-sessions that processed data (`core/usage.py`). For that total to survive a
+sessions that processed data (`hydrochem_workbench/usage.py`). For that total to survive a
 restart on Streamlit Cloud, add Upstash Redis secrets in either layout:
 
     [upstash]
@@ -166,24 +166,60 @@ app says so under the count. The key defaults to `hydrochem:runs`, so it can
 share a database with the other apps' counters. `.streamlit/config.toml` turns off Streamlit's browser
 usage statistics.
 
+## Use from Python, without the app
+
+Everything the app calculates and draws is in the `hydrochem_workbench` package,
+which has no Streamlit in it. Install it from the repository folder:
+
+    pip install .            # the calculations and figures
+    pip install .[map]       # with the sample map (geopandas, contextily)
+
+or straight from GitHub:
+
+    pip install git+https://github.com/DylanIrvine/hydrochem-workbench.git
+
+Then, from a script, Spyder or a notebook:
+
+    import hydrochem_workbench as hw
+
+    result = hw.run('my_data.xlsx', unit='mg/L')      # a filled template
+    v = result.table                                  # every sample, every derived variable
+    hw.save_results(result, 'results.xlsx')           # the results workbook
+    hw.save_figures(result, 'figures', dpi=300)       # Piper, Schoeller, Stiff, Durov, Gibbs, Chadha, HFE-D, gallery
+
+`hw.run()` takes the same choices as the app's sidebar: units, the below-LOR
+fraction, how to fill a missing pH, temperature or alkalinity, the uncertainty
+analysis (`uncertainty_n=200`) and the charge balance limit and action. The
+app calls the same functions (`hydrochem_workbench/workflow.py`), so a script
+and the app give the same numbers for the same settings; a test checks this.
+Any single figure can be drawn with the functions in `hydrochem_workbench.plots`
+(for example `plots.piper(result.plotted)`), which return a matplotlib figure.
+`examples/run_workbench.py` is a complete script with the settings in a block
+at the top.
+
+The functions named above (`run`, `save_results`, `save_figures`, and `process`,
+`fill_rules`, `style_groups`, `mark_charge_balance`) are the ones intended for
+scripts. Other functions in the package may change between versions.
+
 ## Layout
 
     app.py            Streamlit front end
-    core/chem.py      template, cleaning, units, fill rules, PHREEQC, derived table
-    core/guidelines.py  guideline values and the comparison
-    core/gibbs_fields.py  outline of the Gibbs envelope (from WQChartPy)
-    core/plots.py     all figures
-    core/maps.py      the sample map: coordinates, towns, polygon files, imagery, figure
-    core/data/        country and state outlines for the map inset (Natural Earth)
-    core/advanced.py      mixing, PCA, clusters and group tests (no Streamlit)
-    core/plots_advanced.py  their figures
-    core/uncertainty.py  Monte Carlo uncertainty analysis and its default inputs
-    core/usage.py     the usage counter
+    pyproject.toml    for installing the package (not used by the app)
+    hydrochem_workbench/workflow.py  the steps of a run, for scripts and the app: run(), process(), outputs
+    hydrochem_workbench/chem.py      template, cleaning, units, fill rules, PHREEQC, derived table
+    hydrochem_workbench/guidelines.py  guideline values and the comparison
+    hydrochem_workbench/gibbs_fields.py  outline of the Gibbs envelope (from WQChartPy)
+    hydrochem_workbench/plots.py     all figures
+    hydrochem_workbench/maps.py      the sample map: coordinates, towns, polygon files, imagery, figure
+    hydrochem_workbench/data/        country and state outlines for the map inset (Natural Earth), badge icon
+    hydrochem_workbench/advanced.py      mixing, PCA, clusters and group tests
+    hydrochem_workbench/plots_advanced.py  their figures
+    hydrochem_workbench/uncertainty.py  Monte Carlo uncertainty analysis and its default inputs
+    hydrochem_workbench/usage.py     the usage counter
+    examples/         a synthetic dataset and run_workbench.py, the package used from a script
     packages.txt      system font for Streamlit Cloud (Liberation Sans)
     logo/             header logo, browser-tab icon and svg source
-    tests/            pytest: chemistry checks and a headless run of the app
-
-`core/` has no Streamlit in it and can be used from Spyder directly.
+    tests/            pytest: chemistry checks, the package from a script, and a headless run of the app
 
 ## Known limits (version 0.1)
 
@@ -215,7 +251,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D.J. (2026). Hydrochem Workbench (version 0.15.0)
+Irvine, D.J. (2026). Hydrochem Workbench (version 0.16.0)
 [Web application]. Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).
@@ -232,7 +268,7 @@ Please also cite PHREEQC and WQChartPy (below).
   Esri's server when a map is drawn (not part of this repository) and credited
   on the figure.
 - **Natural Earth** (public domain), 1:50m country and state outlines for the
-  map inset, in `core/data/natural_earth_50m.gpkg` with coordinates rounded to
+  map inset, in `hydrochem_workbench/data/natural_earth_50m.gpkg` with coordinates rounded to
   0.01 degrees.
 - GeoPandas, contextily and pyproj (BSD-3-Clause/MIT) for the map.
 - Streamlit (Apache-2.0), pandas and NumPy (BSD-3-Clause), Matplotlib

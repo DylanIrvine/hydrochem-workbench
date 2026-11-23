@@ -4,7 +4,7 @@ import pandas as pd
 import phreeqpython
 import pytest
 
-from core import chem, uncertainty as U
+from hydrochem_workbench import chem, uncertainty as U
 
 RULES = (('pH', ('mean', 7.0)), ('Temp', ('mean', 25.0)), ('HCO3', ('mean', 100.0)))
 
@@ -132,7 +132,7 @@ def test_other_units_run(pp):
 
 
 def test_outline_and_hull():
-    from core import plots
+    from hydrochem_workbench import plots
     rng = np.random.default_rng(0)
     line = plots.central_outline(rng.normal(0, 1, 500), rng.normal(0, 1, 500))
     assert line is not None and np.allclose(line[0], line[-1])
@@ -146,7 +146,7 @@ def test_outline_and_hull():
 
 def test_wqchartpy_realisations_match_samples(pp):
     # with no uncertainty every realisation lands on its sample, in every diagram
-    from core import plots
+    from hydrochem_workbench import plots
     df, _, settings = _setup()
     t = U.default_table()
     t[['LOR', 'Relative SD (%)', 'Absolute SD']] = 0.0

@@ -5,7 +5,7 @@ from streamlit.testing.v1 import AppTest
 
 
 def plots_gallery_sets():
-    from core import plots
+    from hydrochem_workbench import plots
     return list(plots.GALLERY)
 
 APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app.py')
@@ -106,10 +106,10 @@ def test_app_runs_on_example_data(tmp_path, monkeypatch):
 
 def test_app_recovers_from_stale_core_modules(tmp_path, monkeypatch):
     # what Streamlit Cloud did after an update: new app.py, old core modules still in memory
-    import core
-    from core import guidelines
+    import hydrochem_workbench
+    from hydrochem_workbench import guidelines
     monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
-    monkeypatch.setattr(core, 'VERSION', '0.6')
+    monkeypatch.setattr(hydrochem_workbench, 'VERSION', '0.6')
     monkeypatch.delattr(guidelines, 'REGIONAL_NAME')
     at = AppTest.from_file(APP, default_timeout=120)
     at.run()
@@ -120,7 +120,7 @@ def test_app_recovers_from_stale_core_modules(tmp_path, monkeypatch):
 
 def test_settings_survive_loading_another_dataset(tmp_path, monkeypatch):
     # set things up on one dataset, load another, and nothing should be lost
-    from core import chem
+    from hydrochem_workbench import chem
     monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
     first = chem.example_data().astype(object)
     second = chem.example_data().astype(object).iloc[::2].reset_index(drop=True)
@@ -258,7 +258,7 @@ def test_mixing_with_uncertainty(tmp_path, monkeypatch):
 def test_large_dataset_warning(tmp_path, monkeypatch):
     import numpy as np
     import pandas as pd
-    from core import chem
+    from hydrochem_workbench import chem
     monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
     small = chem.example_data()
     rng = np.random.default_rng(2)
@@ -279,7 +279,7 @@ def test_large_dataset_warning(tmp_path, monkeypatch):
 def test_map_view(tmp_path, monkeypatch):
     # the Map view on the example data, with a made-up image in place of the imagery download
     import numpy as np
-    from core import maps
+    from hydrochem_workbench import maps
     monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
     calls = []
 
@@ -337,7 +337,7 @@ def test_map_view(tmp_path, monkeypatch):
 
 def test_map_view_when_imagery_fails(tmp_path, monkeypatch):
     # no connection to the map server: a white map and a note, and no retry on every rerun
-    from core import maps
+    from hydrochem_workbench import maps
     monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
     calls = []
 
@@ -359,7 +359,7 @@ def test_map_view_when_imagery_fails(tmp_path, monkeypatch):
 
 
 def test_map_view_without_coordinates(tmp_path, monkeypatch):
-    from core import chem
+    from hydrochem_workbench import chem
     monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
     plain = chem.example_data().drop(columns=chem.LOC_COLS)
     monkeypatch.setattr(chem, 'example_data', lambda: plain)
@@ -378,7 +378,7 @@ def test_map_layers(tmp_path, monkeypatch):
     import numpy as np
     import geopandas as gpd
     from shapely.geometry import Polygon
-    from core import maps
+    from hydrochem_workbench import maps
     monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
     monkeypatch.setattr(maps, 'fetch_basemap', lambda extent, zoom: (np.full((120, 160, 4), 120, dtype=np.uint8), extent))
     zone = gpd.GeoDataFrame(geometry=[Polygon([(132.4, -14.7), (132.8, -14.7), (132.8, -14.3), (132.4, -14.3)])],
@@ -417,7 +417,7 @@ def test_map_uploads(tmp_path, monkeypatch):
     import numpy as np
     import geopandas as gpd
     from shapely.geometry import Polygon
-    from core import maps
+    from hydrochem_workbench import maps
     monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
     monkeypatch.setattr(maps, 'fetch_basemap', lambda extent, zoom: (np.full((120, 160, 4), 120, dtype=np.uint8), extent))
     zone = gpd.GeoDataFrame(geometry=[Polygon([(132.4, -14.7), (132.8, -14.7), (132.8, -14.3), (132.4, -14.3)])],
@@ -462,7 +462,7 @@ def test_map_uploads(tmp_path, monkeypatch):
 def test_charge_balance_options(tmp_path, monkeypatch):
     # mark (the default), exclude and no action; then judged on the uncertainty interval
     import numpy as np
-    from core import chem, maps
+    from hydrochem_workbench import chem, maps
     monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
     monkeypatch.setattr(maps, 'fetch_basemap', lambda extent, zoom: (np.full((60, 80, 4), 120, dtype=np.uint8), extent))
     at = AppTest.from_file(APP, default_timeout=180)

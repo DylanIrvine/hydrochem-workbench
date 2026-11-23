@@ -6,9 +6,9 @@
 # Foundation, either version 3 of the License, or (at your option) any later
 # version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file.
 
-# core/plots_advanced.py
+# hydrochem_workbench/plots_advanced.py
 # figures for the further analyses (mixing, PCA, clusters, group comparison), in the
-# same style as core/plots.py
+# same style as hydrochem_workbench/plots.py
 
 # %%
 import numpy as np
@@ -20,10 +20,10 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, NullFormatter
 
-from core import plots
-from core.plots import STYLE, CM, PALETTE, MARKERS, pretty
-from core.advanced import analyte_of
-from core.chem import hollow_mask
+from hydrochem_workbench import plots
+from hydrochem_workbench.plots import STYLE, CM, PALETTE, MARKERS, pretty
+from hydrochem_workbench.advanced import analyte_of
+from hydrochem_workbench.chem import hollow_mask
 
 EM_STYLE = dict(marker='*', s=150, color='white', edgecolors='black', linewidths=1.0, zorder=60)
 PANELS_PER_PAGE = 6
@@ -307,7 +307,7 @@ def _p_text(p):
 
 def box_page(v, cols, kw, log=False, letters=None, letters_pos=plots.PANEL_LABEL_POS[0]):
     # one panel per variable: a box for each group with the samples over it, Kruskal-Wallis p in the corner
-    from core.advanced import measured
+    from hydrochem_workbench.advanced import measured
     n = len(cols)
     if not n:
         return None

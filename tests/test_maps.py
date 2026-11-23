@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core import chem, maps, plots
+from hydrochem_workbench import chem, maps, plots
 
 gpd = pytest.importorskip('geopandas')
 from shapely.geometry import LineString, Polygon

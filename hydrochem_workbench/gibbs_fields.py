@@ -10,7 +10,7 @@
 # Copyright (C) the WQChartPy authors (Yang et al., 2022), GPL-3.0:
 # https://github.com/jyangfsu/WQChartPy. Rearranged 2026 into closed outlines.
 
-# core/gibbs_fields.py
+# hydrochem_workbench/gibbs_fields.py
 # outline of the Gibbs (1970) envelope, digitised in WQChartPy.
 # x is the ratio (0 to 1), y is TDS in mg/L. Each outline is in three parts:
 # lower edge, inner notch (bottom to top) and upper edge

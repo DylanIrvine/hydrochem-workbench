@@ -1,9 +1,9 @@
-# tests for core/chem.py
+# tests for hydrochem_workbench/chem.py
 import numpy as np
 import pandas as pd
 import pytest
 
-from core import chem
+from hydrochem_workbench import chem
 
 
 def one_sample(**kw):
@@ -162,7 +162,7 @@ def test_dic_gives_the_same_answer_as_alkalinity():
 
 
 def test_guidelines():
-    from core import guidelines
+    from hydrochem_workbench import guidelines
     raw = pd.concat([
         one_sample(Sample='ok', pH=7.2, Temp=25, Ca=20, Mg=5, Na=30, K=2, Cl=40, SO4=20, Total_Alk_CaCO3=60,
                    NO3=5, F=0.3, Mn=0.01, Fe=0.05),
@@ -250,7 +250,7 @@ def test_one_entered_ion_takes_the_rest_of_the_alkalinity():
 
 
 def test_fao_classes_by_hand():
-    from core import guidelines
+    from hydrochem_workbench import guidelines
     # SAR, EC (uS/cm) -> expected infiltration class (FAO 29 Table 1)
     cases = [(2, 800, 0), (2, 500, 1), (2, 150, 2), (5, 1300, 0), (5, 250, 2), (15, 2000, 1),
              (15, 1000, 2), (30, 6000, 0), (50, 1000, np.nan), (np.nan, 1000, np.nan)]
@@ -267,7 +267,7 @@ def test_fao_classes_by_hand():
 
 
 def test_who_and_fao_sets_in_assess():
-    from core import guidelines
+    from hydrochem_workbench import guidelines
     raw = pd.concat([
         one_sample(Sample='fresh', pH=7.2, Temp=25, Ca=20, Mg=5, Na=30, K=2, Cl=40, SO4=20, Total_Alk_CaCO3=60,
                    EC=300, B=0.1),
@@ -289,7 +289,7 @@ def test_who_and_fao_sets_in_assess():
 
 
 def test_chart_lines_and_bars():
-    from core import guidelines, plots
+    from hydrochem_workbench import guidelines, plots
     v = pd.DataFrame({'Sample': ['a', 'b', 'c'], 'Label': ['x', 'x', 'y'], 'Color': '', 'Marker': '',
                       'NO3-N (mg/L)': [0.5, 2.0, 5.0], 'Hardness (mg/L as CaCO3)': [10, 100, 300],
                       'pH': [6.0, 7.0, 9.0], 'EC': [500, 1000, 4000]})
@@ -330,7 +330,7 @@ def test_chadha_fields():
 
 def test_panel_letters_styles_and_gibbs():
     from matplotlib.figure import Figure
-    from core import plots
+    from hydrochem_workbench import plots
     fig = Figure()
     axs = fig.subplots(1, 3)
     for style, want in [('(a)', ['(a)', '(b)', '(c)']), ('a)', ['a)', 'b)', 'c)']), ('a', ['a', 'b', 'c']),
@@ -371,7 +371,7 @@ def test_group_means_skip_filled_values():
 
 
 def test_group_mean_markers_are_drawn():
-    from core import plots
+    from hydrochem_workbench import plots
     v = chem.example_data()
     df, _, extra, _ = chem.clean(v.astype(object))
     import phreeqpython
