@@ -35,7 +35,7 @@ from hydrochem_workbench import (chem, guidelines, plots, uncertainty, usage, ad
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.16.0'   # keep the same as VERSION in hydrochem_workbench/__init__.py
+APP_VERSION = '0.16.1'   # keep the same as VERSION in hydrochem_workbench/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -426,22 +426,7 @@ with st.sidebar:
     h_how = st.selectbox('Missing alkalinity', FILL3, key=opt('opt_h_how', FILL3[0]))
     h_val = st.number_input('Fixed alkalinity (mg/L as CaCO3)', step=10.0, key=opt('opt_h_val', DEFAULT_ALK)) if h_how == 'Fixed value' else DEFAULT_ALK
 
-    st.header('5. Plot options')
-    log_conc = st.checkbox('Log axes on concentration plots', key=opt('opt_log_conc', False),
-                           help='Useful when fresh and saline samples share a plot.')
-    show_means = st.checkbox('Show group means as large markers', key=opt('opt_means', False),
-                             help='Adds the mean of each group to the Piper, gallery and custom plots, as a '
-                                  'larger version of the group marker. The means are listed on the Data tab.')
-    letters = st.selectbox('Panel letters (multipanel figures)', ['None'] + list(plots.PANEL_LABELS),
-                           key=opt('opt_letters', 'None', ['None'] + list(plots.PANEL_LABELS)),
-                           help='For every figure with more than one panel: the gallery pages, the Stiff '
-                                'grid and the Gibbs diagram.')
-    letters = None if letters == 'None' else letters
-    letters_pos = st.selectbox('Panel letter position', plots.PANEL_LABEL_POS,
-                               key=opt('opt_letters_pos', plots.PANEL_LABEL_POS[0], plots.PANEL_LABEL_POS),
-                               disabled=letters is None)
-
-    st.header('6. Uncertainty')
+    st.header('5. Uncertainty')
     use_unc = st.checkbox('Include uncertainty analysis', key=opt('opt_unc', False),
                           help='Carries the measurement uncertainty of every input through the whole '
                                'calculation (Monte Carlo). Intervals are drawn as light grey lines.')
@@ -461,7 +446,7 @@ with st.sidebar:
                        st.session_state.get('unc_current', st.session_state.get('unc_base', U.default_table()))))
                        ['Source'] == 'Entered by user').any() else 'Default values are in use.'))
 
-    st.header('7. Charge balance')
+    st.header('6. Charge balance')
     CB_BASES = ['The calculated value', 'The uncertainty interval']
     CB_ACTIONS = ['Mark on the plots', 'Exclude from the plots and analyses', 'No action']
     cb_limit = st.number_input('Limit on the charge balance error (%)', min_value=0.0, max_value=50.0, step=1.0,
@@ -485,6 +470,21 @@ with st.sidebar:
                                   'and the further analyses. Either way every sample stays in the tables and '
                                   'the guideline comparison, with its status in the "Charge balance check" '
                                   'column.')
+
+    st.header('7. Plot options')
+    log_conc = st.checkbox('Log axes on concentration plots', key=opt('opt_log_conc', False),
+                           help='Useful when fresh and saline samples share a plot.')
+    show_means = st.checkbox('Show group means as large markers', key=opt('opt_means', False),
+                             help='Adds the mean of each group to the Piper, gallery and custom plots, as a '
+                                  'larger version of the group marker. The means are listed on the Data tab.')
+    letters = st.selectbox('Panel letters (multipanel figures)', ['None'] + list(plots.PANEL_LABELS),
+                           key=opt('opt_letters', 'None', ['None'] + list(plots.PANEL_LABELS)),
+                           help='For every figure with more than one panel: the gallery pages, the Stiff '
+                                'grid and the Gibbs diagram.')
+    letters = None if letters == 'None' else letters
+    letters_pos = st.selectbox('Panel letter position', plots.PANEL_LABEL_POS,
+                               key=opt('opt_letters_pos', plots.PANEL_LABEL_POS[0], plots.PANEL_LABEL_POS),
+                               disabled=letters is None)
 
 HOW = {'Mean of the dataset': 'mean', 'Fixed value': 'value', 'From charge balance': 'balance'}
 rules = (('pH', (HOW[ph_how], ph_val)), ('Temp', (HOW[t_how], t_val)), ('HCO3', (HOW[h_how], h_val)))
@@ -636,7 +636,7 @@ if cb_beyond.any():
     done = {CB_ACTIONS[0]: 'They are marked with a ring on the plots.',
             CB_ACTIONS[1]: 'They are left off every plot and out of the group means and the further analyses, '
                            'and stay in the tables.',
-            CB_ACTIONS[2]: 'No action is taken (see "7. Charge balance" in the sidebar).'}[cb_action]
+            CB_ACTIONS[2]: 'No action is taken (see "6. Charge balance" in the sidebar).'}[cb_action]
     names = list(v.loc[cb_beyond, 'Sample'].astype(str))
     st.info(f"{int(cb_beyond.sum())} sample(s) have a charge balance error beyond {cb_limit:g} %"
             + (' even allowing for measurement uncertainty' if cb_unc else '') + ': '
@@ -661,7 +661,7 @@ if view == 'Data and checks':
     cbe_ok = (v[chem.CB_COL] == chem.CB_WITHIN).sum()
     c3.metric(f'Charge balance within {cb_limit:g} %',
               f'{int(cbe_ok)} of {int((v[chem.CB_COL] != chem.CB_NA).sum())}',
-              help='Of the samples that can be assessed (a measured alkalinity). Set in "7. Charge balance" '
+              help='Of the samples that can be assessed (a measured alkalinity). Set in "6. Charge balance" '
                    'in the sidebar.')
     c4.metric('Filled samples', n_filled)
 

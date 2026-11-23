@@ -9,7 +9,7 @@
 # see examples/run_workbench.py
 
 # keep the same as APP_VERSION in app.py
-VERSION = '0.16.0'
+VERSION = '0.16.1'
 __version__ = VERSION
 
 from hydrochem_workbench.workflow import (  # noqa: E402,F401

@@ -251,7 +251,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D.J. (2026). Hydrochem Workbench (version 0.16.0)
+Irvine, D.J. (2026). Hydrochem Workbench (version 0.16.1)
 [Web application]. Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).
