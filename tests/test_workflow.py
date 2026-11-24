@@ -83,7 +83,9 @@ def test_save_results_and_figures(tmp_path, pp, result):
     from hydrochem_workbench import guidelines
     path = hw.save_results(result, tmp_path / 'results.xlsx', guideline_sets=guidelines.set_names()[:2])
     sheets = pd.read_excel(path, sheet_name=None)
-    assert {'Results', 'Settings', 'Groups', 'Group means', 'Group mean counts', 'Guidelines'} <= set(sheets)
+    assert {'Results', 'Settings', 'Groups', 'Group means', 'Group mean counts', 'Statistics', 'Guidelines', 'Irrigation',
+            'Scaling', 'Analysis checks', 'Outliers', 'CCME WQI'} <= set(sheets)
+    assert set(sheets['CCME WQI']['Guideline set']) == set(guidelines.set_names()[:2])
     assert len(sheets['Results']) == 26 and chem.CB_COL in sheets['Results'].columns
     assert not {'Color', 'Marker', chem.CB_RING, chem.CB_LABEL} & set(sheets['Results'].columns)
     files, notes = hw.save_figures(result, tmp_path / 'figures', dpi=50)
@@ -91,6 +93,7 @@ def test_save_results_and_figures(tmp_path, pp, result):
     assert {'piper.png', 'schoeller.png', 'stiff_1.png', 'stiff_2.png', 'durov.png', 'gibbs.png', 'chadha.png',
             'hfe-d.png'} <= names
     assert any(n.startswith('gallery_') for n in names)
+    assert {'irrigation_ussl.png', 'irrigation_wilcox.png'} <= names
     assert all(os.path.getsize(f) > 1000 for f in files)
     pdf, _ = hw.save_figures(hw.run(chem.example_data().head(6), phreeqc=pp), tmp_path / 'pdf', fmt='pdf')
     assert all(f.endswith('.pdf') for f in pdf)

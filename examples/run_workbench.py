@@ -25,6 +25,7 @@ OUT_FOLDER = 'workbench_output'
 UNIT = 'mg/L'                 # unit of every ion column: 'mg/L', 'mmol/L' or 'meq/L'
 N_AS_N = False                # True if NO3 and NH4 are entered as N
 P_AS_P = False                # True if PO4 is entered as P
+EC_UNIT = 'uS/cm'             # unit of the EC column: 'uS/cm', 'mS/cm' (or 'dS/m') or 'mS/m'
 
 LOR_FRACTION = 0.5            # values below the LOR are replaced with this fraction of the LOR
 
@@ -42,7 +43,7 @@ DPI = 300
 FIG_FORMAT = 'png'            # 'png', 'pdf', 'svg', 'tiff' ...
 
 # %% run
-result = hw.run(DATA_FILE, unit=UNIT, n_as_n=N_AS_N, p_as_p=P_AS_P, lor_fraction=LOR_FRACTION,
+result = hw.run(DATA_FILE, unit=UNIT, n_as_n=N_AS_N, p_as_p=P_AS_P, ec_unit=EC_UNIT, lor_fraction=LOR_FRACTION,
                 missing_ph=MISSING_PH, missing_temp=MISSING_TEMP, missing_alkalinity=MISSING_ALKALINITY,
                 uncertainty_n=UNCERTAINTY_N, cb_limit=CB_LIMIT, cb_action=CB_ACTION, cb_basis=CB_BASIS)
 print(result)
@@ -50,6 +51,8 @@ print(result)
 v = result.table          # every sample: one row each, all derived variables
 for p in result.problems:
     print('Note:', p)
+if result.ec_warning:
+    print('Note:', result.ec_warning)
 print(v[['Sample', 'Label', 'Water type', 'CBE (%)', 'Charge balance check']].to_string(index=False))
 
 # %% outputs

@@ -30,12 +30,12 @@ from matplotlib import colors as mcolors
 
 import hydrochem_workbench
 from hydrochem_workbench import (chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced, maps,
-                                 workflow)
+                                 workflow, quality, plots_quality)
 
 # %% CONFIG
 APP_NAME = 'Hydrochem Workbench'
 APP_URL = 'https://hydrochem-workbench.streamlit.app/'
-APP_VERSION = '0.16.1'   # keep the same as VERSION in hydrochem_workbench/__init__.py
+APP_VERSION = '0.19.0'   # keep the same as VERSION in hydrochem_workbench/__init__.py
 
 # after an update on Streamlit Cloud the server can keep old copies of the core
 # modules in memory while running the new app.py. If the versions do not match,
@@ -43,11 +43,13 @@ APP_VERSION = '0.16.1'   # keep the same as VERSION in hydrochem_workbench/__ini
 if getattr(hydrochem_workbench, 'VERSION', None) != APP_VERSION:
     import importlib
     importlib.reload(hydrochem_workbench)
-    for _m in (chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced, maps, workflow):
+    for _m in (chem, guidelines, plots, uncertainty, usage, advanced, plots_advanced, maps, quality, plots_quality,
+               workflow):
         importlib.reload(_m)
 
 _record_use, _usage_status = usage.increment, usage.status
 A, PA = advanced, plots_advanced
+Q, PQ = quality, plots_quality
 
 PANELS_PER_PAGE = workflow.PANELS_PER_PAGE
 DEFAULT_PH = 7.0
@@ -100,12 +102,14 @@ st.write(
     'the plots a hydrogeochemist would make first. Download the template from the sidebar, paste '
     'your data in (one row per sample, one unit for every ion, alkalinity as CaCO3 straight from '
     'the lab report), choose the unit and upload it.\n\n'
-    'What comes back: charge balance, water type, saturation indices and pCO2, a comparison with '
+    'What comes back: charge balance, water type, saturation indices and pCO2, irrigation indices and '
+    'descriptive statistics, a comparison with '
     'Australian, WHO and FAO (irrigation) water quality guidelines with a bar chart against any of them, a Piper diagram, the '
     'classical diagrams, a gallery of diagnostic ion, ratio and saturation-index plots with '
     'reference lines, a builder for any plot the gallery does not have, and, if the samples have '
     'coordinates, a location map over satellite imagery. The database is '
-    'phreeqc.dat, so results are for fresh water; saline samples are flagged.\n\n'
+    'phreeqc.dat by default, so results are for fresh water and saline samples are flagged; wateq4f.dat and '
+    'pitzer.dat can be chosen instead.\n\n'
     'Optionally, the measurement uncertainty of every input (laboratory uncertainty, values below the '
     'limit of reporting, field probe accuracy) can be carried through the whole calculation by Monte '
     'Carlo, so saturation indices, ratios, charge balance and water type come with an interval, or a '
@@ -294,26 +298,26 @@ with st.expander('**How to cite and references**'):
 
 # %% functions
 @st.cache_resource
-def get_phreeqc():
-    # load the database once
-    return workflow.get_phreeqc()
+def get_phreeqc(database='phreeqc.dat'):
+    # load each database once
+    return workflow.get_phreeqc(database)
 
 
-def process(raw, unit, n_as_n, p_as_p, dic_unit, rules, lor):
+def process(raw, unit, n_as_n, p_as_p, dic_unit, rules, lor, database='phreeqc.dat', ec_unit='uS/cm'):
     # below-LOR substitution, clean, convert, fill, run PHREEQC
     # lor = (fraction, text, negative)
     # results are kept in session_state (not st.cache_data) so nothing is held after the user leaves
     # returns (results, dropped cells, PHREEQC errors, problems, replaced below-LOR values,
     #          what the uncertainty analysis needs)
-    key = hashlib.sha1((raw.to_csv() + repr((unit, n_as_n, p_as_p, dic_unit, rules, lor))).encode()).hexdigest()
+    key = hashlib.sha1((raw.to_csv() + repr((unit, n_as_n, p_as_p, dic_unit, rules, lor, database, ec_unit))).encode()).hexdigest()
     cached = st.session_state.get('result')
     if cached is not None and cached[0] == key:
         return cached[1]
 
     # the calculation itself is workflow.process(), the same one a script uses
     with st.spinner('Running PHREEQC ...'):
-        r = workflow.process(raw, get_phreeqc(), unit, n_as_n, p_as_p, dic_unit, rules, lor)
-        base = None if r['base'] is None else dict(r['base'], key=key)
+        r = workflow.process(raw, get_phreeqc(database), unit, n_as_n, p_as_p, dic_unit, rules, lor, ec_unit)
+        base = None if r['base'] is None else dict(r['base'], key=key, database=database)
         out = (r['table'], r['dropped'], r['errors'], r['problems'], r['replaced'], base)
     st.session_state['result'] = (key, out)
     return out
@@ -327,7 +331,7 @@ def monte_carlo(base, table, n):
     if cached is not None and cached[0] == key:
         return cached[1]
     bar = st.progress(0.0, text=f'Uncertainty analysis: {n} realisations through PHREEQC ...')
-    mc = U.run(base['df'], base['below'], table, base['settings'], get_phreeqc(), n=n,
+    mc = U.run(base['df'], base['below'], table, base['settings'], get_phreeqc(base['database']), n=n,
                progress=lambda f: bar.progress(f, text=f'Uncertainty analysis: {int(round(f * n))} of {n} '
                                                        'realisations'))
     bar.empty()
@@ -392,10 +396,26 @@ with st.sidebar:
     N_OPTS = ['The ion (NO3, NH4)', 'As N (NO3-N, NH3-N)']
     P_OPTS = ['Phosphate as PO4', 'Phosphate as P']
     DIC_OPTS = ['mg/L as C', 'mmol/L']
-    n_choice = st.selectbox('NO3 and NH4 columns hold', N_OPTS, key=opt('opt_n_form', N_OPTS[0]))
+    n_choice = st.selectbox('NO3, NO2 and NH4 columns hold', N_OPTS, key=opt('opt_n_form', N_OPTS[0]),
+                            help='One choice for nitrate, nitrite and ammonium.')
     p_choice = st.selectbox('PO4 column holds', P_OPTS, key=opt('opt_p_form', P_OPTS[0]))
     dic_unit = st.selectbox('DIC column is in', DIC_OPTS, key=opt('opt_dic_unit', DIC_OPTS[0]),
                             help='DIC is only used for samples with no alkalinity.')
+    EC_OPTS = list(chem.EC_UNITS)
+    ec_unit = st.selectbox('EC column is in', EC_OPTS, format_func=chem.EC_LABELS.get,
+                           key=opt('opt_ec_unit', EC_OPTS[0], EC_OPTS),
+                           help='EC is converted to µS/cm, which every table and plot uses. A wrong unit is not '
+                                'obvious from the numbers alone: 1.5 mS/cm read as µS/cm would be classed as '
+                                'very fresh water. The app warns if the EC and the ions disagree by a factor '
+                                'that looks like a unit.')
+    DB_OPTS = list(chem.DATABASES)
+    database = st.selectbox('PHREEQC database', DB_OPTS, format_func=chem.DATABASES.get,
+                            key=opt('opt_database', DB_OPTS[0], DB_OPTS),
+                            help='phreeqc.dat suits most fresh water. wateq4f.dat adds Ni and I to the speciation '
+                                 'but has no conductivity data, so EC is not calculated. pitzer.dat is for saline '
+                                 'water and brines; it has no nitrogen, phosphorus, fluoride, aluminium or trace '
+                                 'metals, so those are left out of the speciation and some saturation indices '
+                                 'are not available. Constituents a database lacks stay in the tables and plots.')
 
     st.header('3. Below the LOR')
     st.caption('Values below the limit of reporting (LOR) can be replaced by a fraction of the LOR. '
@@ -502,7 +522,8 @@ else:
     st.stop()
 
 v, dropped, errors, problems, replaced, base = process(raw, unit, n_choice.startswith('As N'), p_choice.endswith('as P'),
-                                                       dic_unit, rules, (lor_fraction, lor_text, lor_neg))
+                                                       dic_unit, rules, (lor_fraction, lor_text, lor_neg), database,
+                                                       ec_unit)
 for p in problems:
     st.error(p)
 if v is None:
@@ -521,13 +542,21 @@ if n_dropped:
     st.warning(f'{n_dropped} cell(s) were not usable numbers and were treated as missing. '
                'They are listed on the Data tab. The "Below the LOR" options in the sidebar handle '
                '"<" and negative values; anything else (e.g. "bd", "n/a") needs fixing in the file.')
+ec_warning = chem.ec_unit_check(v, ec_unit)
+if ec_warning:
+    st.warning(ec_warning + ' The unit is set under "2. Units" in the sidebar. Until it is right, the irrigation '
+               'classes, the analysis checks and any plot of EC are wrong.')
+db_left_out = chem.left_out_of_speciation(base['df'], get_phreeqc(database))
+if db_left_out and database != 'phreeqc.dat':
+    st.info(f'Not in {database}, so left out of the speciation (still in the tables and plots): '
+            + ', '.join(db_left_out) + '.')
 saline = v['Ionic strength (mol/kgw)'] > chem.IONIC_STRENGTH_WARN
-if saline.any():
+if saline.any() and database != 'pitzer.dat':
     st.warning(f'{int(saline.sum())} sample(s) have ionic strength above {chem.IONIC_STRENGTH_WARN} '
                'mol/kgw (' + ', '.join(v.loc[saline, 'Sample'].astype(str).head(8)) +
-               ('...' if saline.sum() > 8 else '') + '). phreeqc.dat is a freshwater database; '
-               'saturation indices for these samples are approximate and a Pitzer database would be '
-               'the right tool.')
+               ('...' if saline.sum() > 8 else '') + f'). {database} is a freshwater database; '
+               'saturation indices for these samples are approximate. pitzer.dat (under "2. Units" in the '
+               'sidebar) is the right database for them.')
 if len(v) > A.LARGE_DATASET:
     st.warning(f'{len(v)} samples. Above {A.LARGE_DATASET} samples the figures can be slow to draw, crowded, '
                'or in the worst case fail to draw. Every figure is still available; the tables and the '
@@ -650,7 +679,7 @@ st.subheader('Checks, plots and analyses')
 st.caption('Choose a view. Each one uses the groups ticked above.')
 # radio buttons and not st.tabs, as tabs redraw every figure on every click
 VIEWS = ['Data and checks', 'Guidelines', 'Piper', 'Classical diagrams', 'Diagnostic gallery', 'Custom plot',
-         'Map', 'Mixing', 'PCA', 'Clusters', 'Group comparison', 'Export']
+         'Map', 'Irrigation', 'Scaling', 'Mixing', 'PCA', 'Clusters', 'Group comparison', 'Export']
 view = st.radio('View', VIEWS, horizontal=True, label_visibility='collapsed', key=opt('opt_view', VIEWS[0], VIEWS))
 
 # %% view: data
@@ -694,6 +723,18 @@ if view == 'Data and checks':
                'ticked, the large markers on the plots are the mean of whatever is on each axis, so on a '
                'ratio plot the marker is the mean of the ratios, not the ratio of the mean concentrations.')
 
+    st.subheader('Descriptive statistics')
+    stat_vars = st.multiselect('Variables', numeric_choices, key=opt('opt_stat_vars', chem.stat_defaults(v),
+                                                                     numeric_choices))
+    stat_groups = st.checkbox('For each group as well as for all samples', key=opt('opt_stat_groups', True))
+    if stat_vars:
+        st.dataframe(chem.group_stats(v[~cb_exclude], stat_vars, stat_groups).round(3), width='stretch',
+                     hide_index=True)
+        st.caption('n is the number of values used and Missing the share of samples without one. P25 and P75 are '
+                   'the quartiles, SD the sample standard deviation and CV the coefficient of variation. The same '
+                   'values are left out as for the group means. The table goes into the results download as '
+                   'the Statistics sheet.')
+
     if mc is not None:
         st.subheader('Uncertainty')
         st.dataframe(U.summary(v, mc).round(1), width='stretch', hide_index=True)
@@ -702,6 +743,36 @@ if view == 'Data and checks':
                    'zero (oversaturated). Values near 50 % mean the data cannot say which side the sample is on. '
                    f'CBE 5th and 95th percentiles bound the {U.INTERVAL} interval. Samples with a filled pH, '
                    'temperature or alkalinity carry no uncertainty for the filled value itself.')
+
+    if n_replaced:
+        st.subheader('Statistics with values below the LOR')
+        st.dataframe(Q.censored_stats(base['df'], base['below']).round(4), width='stretch', hide_index=True)
+        with st.expander('**About these statistics**'):
+            st.write(Q.CENSORED_TEXT)
+
+    st.subheader('Analysis checks')
+    qa = Q.qa_table(v, cb_limit)
+    if qa['Checks possible'].sum() == 0:
+        st.info('The checks compare the ions with a measured EC and a measured TDS. This dataset has neither '
+                '(the EC and TDS columns of the template), so only the charge balance can be checked.')
+    else:
+        st.dataframe(qa.round(3), width='stretch', hide_index=True)
+        qa_fig = PQ.qa_checks(vp)
+        if qa_fig is not None:
+            show(qa_fig, 'analysis_checks', 'dl_qa')
+    with st.expander('**About these checks**'):
+        st.write(Q.QA_TEXT)
+
+    st.subheader('Outliers, one variable at a time')
+    out_vars = st.multiselect('Variables', numeric_choices, key=opt('opt_out_vars', chem.stat_defaults(v),
+                                                                    numeric_choices))
+    outliers = Q.univariate_outliers(v[~cb_exclude], out_vars)
+    if len(outliers):
+        st.dataframe(outliers.round(3), width='stretch', hide_index=True)
+    else:
+        st.caption('No value is beyond the limit for the variables chosen.')
+    with st.expander('**About outliers**'):
+        st.write(Q.OUTLIER_TEXT)
 
     if n_replaced:
         st.subheader('Values below the LOR that were replaced')
@@ -726,6 +797,12 @@ def _eco_key(region):
 guide_sets = st.session_state[opt('guide_sets', GUIDE_DEFAULT, guidelines.set_names())]
 guide_region = st.session_state[opt('guide_region', 'Tropical Australia', list(guidelines.REGIONS))]
 guide_eco = st.session_state[_eco_key(guide_region)[0]]
+def guideline_rows(set_name):
+    # the guideline values of one set, for the region and ecosystem chosen
+    return (guidelines.regional_rows(guide_region, guide_eco) if set_name == guidelines.REGIONAL_NAME
+            else guidelines.SETS[set_name])
+
+
 if view == 'Guidelines':
     st.subheader('Comparison with water quality guidelines')
     st.write('Australian drinking water (ADWG) and aquatic ecosystem (ANZG) guidelines for fresh, '
@@ -768,6 +845,25 @@ if view == 'Guidelines':
         'moderate upward, and severe cases are marked. FAO values assume semi-arid to arid conditions with '
         'good drainage and are not absolute limits. '
         'Guideline values are revised from time to time: check the current source before relying on them.')
+
+    # CCME water quality index against one of the chosen sets
+    st.subheader('CCME water quality index')
+    wqi_sets = list(guide_sets)
+    if not wqi_sets:
+        st.info('Choose at least one guideline set above.')
+    else:
+        wqi_set = st.selectbox('Guideline set for the index', wqi_sets, key=opt('opt_wqi_set', wqi_sets[0], wqi_sets))
+        wqi = Q.ccme_wqi(v[~cb_exclude], guideline_rows(wqi_set))
+        if wqi['Tests'].sum() == 0:
+            st.info('This set has no single-limit or range guideline for the variables in the dataset, so the '
+                    'index cannot be calculated.')
+        else:
+            st.dataframe(wqi.round(1), width='stretch', hide_index=True)
+            wqi_fig = PQ.ccme_bars(wqi, wqi_set)
+            if wqi_fig is not None:
+                show(wqi_fig, 'ccme_wqi', 'dl_wqi')
+        with st.expander('**About the index, and why it is debated**'):
+            st.write(Q.CCME_TEXT)
 
     # bar chart of one parameter against one guideline
     st.subheader('Bar chart against a guideline')
@@ -1006,7 +1102,18 @@ def compute_pca():
     X, dropped_s = A.prepare(vp, cols)
     if len(X) < 3:
         raise ValueError('Fewer than three samples have every chosen variable.')
-    return A.pca(X, ss.get('opt_pca_transform', A.TRANSFORMS[0])), X, dropped_s
+    how = ss.get('opt_pca_transform', A.TRANSFORMS[0])
+    # multivariate outliers, from the same transformed table the PCA uses
+    out, limit, note = Q.multivariate_outliers(A.transform(X, how))
+    left_out = bool(ss.get('opt_pca_drop', False)) and bool(out['Outlier'].any())
+    if left_out:
+        if (~out['Outlier']).sum() < 3:
+            raise ValueError('Fewer than three samples are left once the outliers are taken out.')
+        X = X[~out['Outlier']]
+    res = A.pca(X, how)
+    res.update(outliers=out, outlier_limit=limit, outlier_note=note, outliers_left_out=left_out,
+               mark_outliers=bool(ss.get('opt_pca_mark', True)))
+    return res, X, dropped_s
 
 
 def compute_clusters():
@@ -1127,7 +1234,29 @@ if view == 'PCA':
         c1, c2 = st.columns(2)
         a = c1.selectbox('x axis', pcs, key=opt('opt_pca_x', pcs[0], pcs))
         b = c2.selectbox('y axis', pcs, key=opt('opt_pca_y', pcs[1], pcs))
+        c1, c2 = st.columns(2)
+        c1.checkbox('Mark multivariate outliers', key=opt('opt_pca_mark', True),
+                    help='Samples unlike the bulk of the data when the chosen variables are taken together '
+                         '(robust Mahalanobis distance). See "About outliers" below.')
+        c2.checkbox('Leave the outliers out of the PCA', key=opt('opt_pca_drop', False),
+                    help='A few extreme samples can set the direction of the first components. Leaving them out '
+                         'shows the structure of the rest. They stay in every other view.')
+        flagged = pca['outliers'][pca['outliers']['Outlier']]
+        if pca['outlier_note']:
+            st.caption('Multivariate outliers: ' + pca['outlier_note'])
+        elif len(flagged):
+            names = list(vp.loc[flagged.index, 'Sample'].astype(str))
+            st.info(f"{len(flagged)} multivariate outlier(s), beyond a robust distance of "
+                    f"{pca['outlier_limit']:.2f}: " + ', '.join(names[:12]) + (' ...' if len(names) > 12 else '')
+                    + ('. They are left out of this PCA.' if pca['outliers_left_out'] else '.'))
         show(PA.pca_biplot(vp, pca, a, b, means=show_means), 'pca_biplot', 'dl_pca')
+        if not pca['outlier_note']:
+            with st.expander('**Robust distances and about outliers**'):
+                dist = pca['outliers'].copy()
+                dist.insert(0, 'Label', vp.loc[dist.index, 'Label'])
+                dist.insert(0, 'Sample', vp.loc[dist.index, 'Sample'])
+                st.dataframe(dist.sort_values('Distance', ascending=False).round(2), hide_index=True)
+                st.write(Q.OUTLIER_TEXT)
         ld = pca['loadings'].rename(index=ION_LABEL)
         ld.loc['Variance explained (%)'] = 100 * pca['explained']
         st.dataframe(ld.round(3), width='stretch')
@@ -1211,6 +1340,45 @@ if view == 'Group comparison':
                 st.caption('Spearman rank correlations across all plotted samples, each from the samples with both '
                            'values (grey: fewer than 4). Correlation across groups often reflects the groups '
                            'themselves (e.g. fresh against saline) rather than a process within any one of them.')
+
+# %% view: irrigation
+if view == 'Irrigation':
+    st.subheader('Suitability for irrigation')
+    st.write('The classical irrigation indices and the two diagrams built on them. EC is the measured value, or '
+             'the conductivity PHREEQC calculates where EC was not measured. The classes assume EC in µS/cm at '
+             '25 °C. The FAO irrigation guidelines are on the Guidelines view.')
+    if vp.empty:
+        st.info('No groups are ticked to plot. Tick at least one in the Groups panel above.')
+    else:
+        irr = Q.irrigation_table(vp)
+        st.dataframe(irr.round(2), width='stretch', hide_index=True)
+        IRR_PLOTS = ['USSL diagram (EC and SAR)', 'Wilcox diagram (EC and percent sodium)']
+        which = st.radio('Diagram', IRR_PLOTS, horizontal=True, key=opt('opt_irr_plot', IRR_PLOTS[0], IRR_PLOTS))
+        irr_fig = PQ.ussl(vp) if which == IRR_PLOTS[0] else PQ.wilcox(vp)
+        if irr_fig is None:
+            st.info('No sample has both an EC and the ions needed for this diagram.')
+        else:
+            show(irr_fig, 'ussl' if which == IRR_PLOTS[0] else 'wilcox', 'dl_irr')
+        with st.expander('**About these classes**'):
+            st.write(Q.IRRIGATION_TEXT)
+
+# %% view: scaling
+if view == 'Scaling':
+    st.subheader('Scaling and corrosion tendency')
+    st.write('The Langelier and Ryznar indices describe whether a water tends to deposit or dissolve calcium '
+             'carbonate, which matters for bores, pipes, pumps and irrigation emitters.')
+    if vp.empty:
+        st.info('No groups are ticked to plot. Tick at least one in the Groups panel above.')
+    else:
+        scal = Q.scaling_table(vp)
+        st.dataframe(scal.round(2), width='stretch', hide_index=True)
+        if scal['Langelier index'].notna().any():
+            show(plots.custom(vp, 'pH', 'Langelier index', zero_line=True, unc=mc, means=show_means),
+                 'langelier_index', 'dl_scal')
+        else:
+            st.info('The indices need pH, calcium and alkalinity (or DIC).')
+        with st.expander('**About these indices**'):
+            st.write(Q.SCALING_TEXT)
 
 # %% view: map
 # every map setting is read from session_state, so the Export view can draw the same map
@@ -1557,13 +1725,16 @@ if view == 'Export':
         ('Run', 'Run at (UTC)', pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M')),
         ('Run', 'Dataset', data_name),
         ('Run', 'Samples', len(v)),
-        ('Run', 'Database', 'phreeqc.dat (phreeqpython)'),
+        ('Run', 'Database', database),
+        ('Run', 'Not in the database (left out of the speciation)', ', '.join(db_left_out) or 'None'),
         ('Units', 'Ion columns', unit),
         ('Units', 'Alkalinity', 'mg/L as CaCO3; HCO3 and CO3 as entered where given, otherwise from '
                                 'PHREEQC (see the "Alkalinity from" and "HCO3, CO3 from" columns)'),
-        ('Units', 'NO3 and NH4 columns', n_choice),
+        ('Units', 'NO3, NO2 and NH4 columns', n_choice),
         ('Units', 'PO4 column', p_choice),
         ('Units', 'DIC column', dic_unit),
+        ('Units', 'EC column', chem.EC_LABELS[ec_unit] + ('' if ec_unit == 'uS/cm' else ', converted to µS/cm')),
+        ('Units', 'EC against the ions', ec_warning or 'Consistent'),
         ('Below the LOR', 'Replace "<" values', 'Yes' if lor_text else 'No'),
         ('Below the LOR', 'Replace negative concentrations', 'Yes' if lor_neg else 'No'),
         ('Below the LOR', 'Replaced with', f'{lor_fraction:g} x LOR' if (lor_text or lor_neg) else 'Not replaced'),
@@ -1644,8 +1815,13 @@ if view == 'Export':
                                                       for k in range(n_em))),
                  ('Mixing', 'Tracers', lab(ss.get('opt_mix_tracers', []))),
                  ('Mixing', 'Ions compared', lab(ss.get('opt_mix_ions', [])))]
+    rows += [('CCME index', 'Guideline set', ss.get('opt_wqi_set', 'Not calculated (Guidelines view not opened)')),
+             ('Outliers', 'Variables checked one at a time', ', '.join(ss.get('opt_out_vars', chem.stat_defaults(v)))),
+             ('Outliers', 'Limit', f'Modified z-score beyond {Q.OUTLIER_Z:g}')]
     if ran['PCA']:
-        rows += [('PCA', 'Variables', lab(ss.get('opt_pca_vars', []))),
+        rows += [('PCA', 'Multivariate outliers', ('Left out' if ss.get('opt_pca_drop') else 'Kept')
+                  + f' (robust distance, {100 * Q.OUTLIER_P:g} % chi-square limit)'),
+                 ('PCA', 'Variables', lab(ss.get('opt_pca_vars', []))),
                  ('PCA', 'Transform', ss.get('opt_pca_transform', A.TRANSFORMS[0]))]
     if ran['Clusters']:
         rows += [('Clusters', 'Variables', lab(ss.get('opt_hca_vars', []))),
@@ -1671,6 +1847,21 @@ if view == 'Export':
         g_means, g_counts = chem.group_means(v[~cb_exclude])
         g_means.to_excel(xl, sheet_name='Group means', index=False)
         g_counts.to_excel(xl, sheet_name='Group mean counts', index=False)
+        # descriptive statistics, for the variables last chosen on the Data view
+        stat_vars = [c for c in ss.get('opt_stat_vars', chem.stat_defaults(v)) if c in v.columns]
+        if stat_vars:
+            chem.group_stats(v[~cb_exclude], stat_vars, ss.get('opt_stat_groups', True)).to_excel(
+                xl, sheet_name='Statistics', index=False)
+        Q.irrigation_table(v).to_excel(xl, sheet_name='Irrigation', index=False)
+        Q.scaling_table(v).to_excel(xl, sheet_name='Scaling', index=False)
+        Q.qa_table(v, cb_limit).to_excel(xl, sheet_name='Analysis checks', index=False)
+        out_vars = [c for c in ss.get('opt_out_vars', chem.stat_defaults(v)) if c in v.columns]
+        Q.univariate_outliers(v[~cb_exclude], out_vars).to_excel(xl, sheet_name='Outliers', index=False)
+        if n_replaced:
+            Q.censored_stats(base['df'], base['below']).to_excel(xl, sheet_name='Below LOR statistics', index=False)
+        if guide_sets and ss.get('opt_wqi_set') in guide_sets:
+            Q.ccme_wqi(v[~cb_exclude], guideline_rows(ss['opt_wqi_set'])).to_excel(xl, sheet_name='CCME WQI',
+                                                                                     index=False)
         if n_replaced:
             replaced.astype({'Value': str}).to_excel(xl, sheet_name='Below LOR replaced', index=False)
         if n_dropped:
@@ -1700,6 +1891,10 @@ if view == 'Export':
                     sc.insert(0, 'Label', vp.loc[sc.index, 'Label'])
                     sc.insert(0, 'Sample', vp.loc[sc.index, 'Sample'])
                     sc.to_excel(xl, sheet_name='PCA scores', index=False)
+                    if not pca['outlier_note']:
+                        dist = pca['outliers'].copy()
+                        dist.insert(0, 'Sample', vp.loc[dist.index, 'Sample'])
+                        dist.to_excel(xl, sheet_name='PCA outliers', index=False)
                     ld = pca['loadings'].copy()
                     ld.loc['Variance explained (%)'] = 100 * pca['explained']
                     ld.to_excel(xl, sheet_name='PCA loadings')
@@ -1726,7 +1921,8 @@ if view == 'Export':
                'missing values, groups, plot options, guidelines, the map), with the group colours and markers '
                'and any replaced below-LOR values on their own sheets, so the run can be reproduced. '
                'The Group means sheet has the mean of each analyte for each group, and Group mean counts '
-               'the number of values behind each mean. '
+               'the number of values behind each mean. The Statistics sheet has the descriptive statistics '
+               'for the variables chosen on the Data view. '
                'With the uncertainty analysis on, three more sheets: the inputs used, the 5th and 95th '
                'percentiles beside every derived variable, and a per-sample summary (probability of the '
                'same water type, Chadha field, charge balance within 5 % and each SI above zero). '
@@ -1806,6 +2002,19 @@ if view == 'Export':
                     highlight=ss.get('opt_gchart_hlcol', '#000000') if ss.get('opt_gchart_hl') else None,
                     line_colour=ss.get('opt_gchart_linecol', '#222222'),
                     log=ss.get('opt_gchart_log', False), sort=ss.get('opt_gchart_sort', False), unc=mc))
+            # irrigation diagrams, analysis checks and the CCME index
+            add('irrigation/ussl.png', PQ.ussl(vp))
+            add('irrigation/wilcox.png', PQ.wilcox(vp))
+            if vp['Langelier index'].notna().any():
+                add('irrigation/langelier_index.png', plots.custom(vp, 'pH', 'Langelier index', zero_line=True,
+                                                                   unc=mc, means=show_means))
+            qa_fig = PQ.qa_checks(vp)
+            if qa_fig is not None:
+                add('checks/analysis_checks.png', qa_fig)
+            if guide_sets and ss.get('opt_wqi_set') in guide_sets:
+                wqi = Q.ccme_wqi(v[~cb_exclude], guideline_rows(ss['opt_wqi_set']))
+                if wqi['Tests'].sum():
+                    add('checks/ccme_wqi.png', PQ.ccme_bars(wqi, ss['opt_wqi_set']))
             # the map, as last set on its view
             if 'opt_map_base' in ss:
                 try:

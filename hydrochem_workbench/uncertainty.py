@@ -69,6 +69,10 @@ _DEFAULTS = [
     ('Fe', ['Fe'], 0.05, 5.0, 0.0, _PLACE),
     ('Mn', ['Mn'], 0.001, 5.0, 0.0, _PLACE),
     ('B', ['B'], 0.05, 5.0, 0.0, _PLACE),
+    ('NO2', ['NO2'], 0.01, 5.0, 0.0, _PLACE),
+    ('I', ['I'], 0.01, 5.0, 0.0, _PLACE),
+    ('Trace metals (Li, Al, Zn, Cu, Cd, Pb, Ni, As, Cr, Se, U, Hg)',
+     ['Li', 'Al', 'Zn', 'Cu', 'Cd', 'Pb', 'Ni', 'As', 'Cr', 'Se', 'U', 'Hg'], 0.001, 5.0, 0.0, _PLACE),
     ('DIC', ['DIC'], 1.0, 5.0, 0.0, _PLACE),
     ('TDS (measured)', ['TDS'], 10.0, 5.0, 0.0, _PLACE),
     ('pH', ['pH'], 0.0, 0.0, round(0.2 / np.sqrt(3), 3), _YSI),
@@ -177,7 +181,7 @@ def lor_in_units(name, col, lor, unit, n_as_n=False, p_as_p=False, dic_unit='mg/
         return {'mg/L': mmol * mw, 'mmol/L': mmol, 'meq/L': meq}[unit]
     mw, z, _ = chem.ANALYTES[col]
     # lab reports give NO3 and NH4 as N and PO4 as P
-    if col in ('NO3', 'NH4'):
+    if col in ('NO3', 'NH4', 'NO2'):
         mmol = lor / chem.MW_N
         as_reported = n_as_n
     elif col == 'PO4':

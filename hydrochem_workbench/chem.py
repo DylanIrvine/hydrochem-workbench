@@ -23,7 +23,7 @@ import pandas as pd
 
 # %% analytes
 # name: (g/mol, charge, PHREEQC name)
-# SiO2 and B have no charge, so they are read as mmol/L if the input unit is meq/L
+# SiO2, B and the others with a charge of 0 here are read as mmol/L if the input unit is meq/L
 ANALYTES = {
     'Ca':   (40.078,  +2, 'Ca'),
     'Mg':   (24.305,  +2, 'Mg'),
@@ -34,6 +34,7 @@ ANALYTES = {
     'Cl':   (35.453,  -1, 'Cl'),
     'SO4':  (96.06,   -2, 'S(6)'),
     'NO3':  (62.004,  -1, 'N(5)'),
+    'NO2':  (46.005,  -1, 'N(3)'),
     'NH4':  (18.039,  +1, 'Amm'),
     'PO4':  (94.971,   0, 'P'),       # charge left out of the balance (pH dependent, small)
     'Br':   (79.904,  -1, 'Br'),
@@ -44,7 +45,26 @@ ANALYTES = {
     'Fe':   (55.845,  +2, 'Fe(2)'),
     'Mn':   (54.938,  +2, 'Mn(2)'),
     'B':    (10.81,    0, 'B'),       # optional; boric acid, left out of the charge balance
+    # minor and trace constituents, all optional. Those with a PHREEQC name are in phreeqc.dat and
+    # go into the speciation; the rest are carried through for the tables, plots and guidelines
+    'Li':   (6.94,    +1, 'Li'),
+    'Al':   (26.982,   0, 'Al'),      # charge left out of the balance (pH dependent: Al(OH)3, Al(OH)4-)
+    'Zn':   (65.38,   +2, 'Zn'),
+    'Cu':   (63.546,  +2, 'Cu(2)'),
+    'Cd':   (112.414, +2, 'Cd'),
+    'Pb':   (207.2,   +2, 'Pb'),
+    'Ni':   (58.693,  +2, None),      # not in phreeqc.dat; counted in the charge balance
+    'I':    (126.904, -1, None),      # iodide; not in phreeqc.dat; counted in the charge balance
+    'As':   (74.922,   0, None),      # not in phreeqc.dat; oxyanions, left out of the charge balance
+    'Cr':   (51.996,   0, None),
+    'Se':   (78.971,   0, None),
+    'U':    (238.029,  0, None),
+    'Hg':   (200.592,  0, None),
 }
+# these get columns in the results only if the dataset has them, so a dataset of major ions
+# does not come back with dozens of empty columns
+OPTIONAL = ['NO2', 'Li', 'Al', 'Zn', 'Cu', 'Cd', 'Pb', 'Ni', 'I', 'As', 'Cr', 'Se', 'U', 'Hg']
+MW_SI = 28.0855
 
 MAJORS = ['Ca', 'Mg', 'Na', 'K', 'HCO3', 'CO3', 'Cl', 'SO4']
 CATIONS = [a for a, (_, z, _) in ANALYTES.items() if z > 0]
@@ -81,6 +101,42 @@ TEMPLATE_COLS = (ID_COLS + LOC_COLS + FIELD_COLS + _ions[:_k] + ALK_COLS + [DIC_
                  + STYLE_COLS)
 
 UNITS = ['mg/L', 'mmol/L', 'meq/L']
+
+# units the EC column can be in, with the factor to uS/cm. Everything after the input is in uS/cm
+EC_UNITS = {'uS/cm': 1.0, 'mS/cm': 1000.0, 'mS/m': 10.0}
+EC_LABELS = {'uS/cm': 'µS/cm', 'mS/cm': 'mS/cm (the same as dS/m)', 'mS/m': 'mS/m'}
+_EC_ALIASES = {'µs/cm': 'uS/cm', 'us/cm': 'uS/cm', 'ms/cm': 'mS/cm', 'ds/m': 'mS/cm', 'ms/m': 'mS/m'}
+
+
+def ec_unit_key(unit):
+    # 'dS/m', 'µS/cm' and so on to the key used in EC_UNITS
+    key = _EC_ALIASES.get(str(unit).strip().lower().replace('μ', 'µ'))
+    if key is None:
+        raise ValueError(f"EC unit must be one of {list(EC_UNITS)} (or 'dS/m'), not {unit!r}")
+    return key
+
+
+def ec_unit_check(v, ec_unit='uS/cm'):
+    # compares the measured EC (already converted to uS/cm) with the EC expected from the ions: the conductivity
+    # PHREEQC calculates, or 100 x the sum of cations in meq/L where the database has no conductivity data
+    # returns a message if they differ by more than a factor of 3 (median of the samples), otherwise ''
+    ec = v['EC'].astype(float)
+    expected = v['SC calc (uS/cm)'].astype(float)
+    expected = expected.where(expected > 0, 100.0 * v['Sum cations (meq/L)'].astype(float))
+    ok = (ec > 0) & (expected > 0)
+    if ok.sum() < 3:
+        return ''
+    ratio = float((ec[ok] / expected[ok]).median())
+    if 1 / 3 <= ratio <= 3:
+        return ''
+    msg = (f'Measured EC is about {ratio:.2g} times the EC expected from the ions (median of {int(ok.sum())} '
+           f'samples), with the EC column read as {EC_LABELS[ec_unit_key(ec_unit)]}.')
+    # the unit that would bring the two into line, if there is one
+    implied = EC_UNITS[ec_unit_key(ec_unit)] / ratio
+    for key, factor in EC_UNITS.items():
+        if factor / 3 <= implied <= factor * 3 and key != ec_unit_key(ec_unit):
+            return msg + f' The values look like {EC_LABELS[key]}. Check the EC unit.'
+    return msg + ' Check the EC column and its unit.'
 
 # mg/L as CaCO3 per meq/L of alkalinity (100.087 / 2)
 CACO3_PER_MEQ = 50.0435
@@ -126,7 +182,7 @@ def template_bytes():
         'Ca, Mg, Na, K, Cl, SO4 ...',
         'ALKALINITY', 'Total_Alk_CaCO3', 'Bicarb_Alk_CaCO3', 'Carb_Alk_CaCO3', 'DIC', '',
         'HCO3', 'CO3',
-        'NO3, NH4', 'PO4', 'SiO2', 'B', 'Color', 'Marker',
+        'NO3, NO2, NH4', 'PO4', 'SiO2', 'B', 'Li, Al, Zn, Cu, Cd, Pb', 'Ni, I, As, Cr, Se, U, Hg', 'Color', 'Marker',
         '(any other column)', '', 'Units', 'Blank cells', 'Below detection'],
         'What goes in it': [
             'Unique sample name. Required.',
@@ -136,7 +192,7 @@ def template_bytes():
             'Depth of the bore screen in m below surface (one value, e.g. the middle of the screen). Optional. Can set the marker size on the map; leave blank for surface water.',
             'Field pH if you have it, otherwise lab pH.',
             'Water temperature, degrees C.',
-            'Electrical conductivity, uS/cm. Optional, used for plotting only.',
+            'Electrical conductivity at 25 degrees C. Optional. In uS/cm unless you choose mS/cm (dS/m) or mS/m in the app. Used for the irrigation classes, the analysis checks and plots.',
             'Total dissolved solids, mg/L. Optional. If blank, it is calculated from the ions.',
             'Concentrations, all in the single unit you choose in the app (mg/L, mmol/L or meq/L).',
             'Enter alkalinity as it appears on the lab report, in mg/L as CaCO3. Do not convert it. PHREEQC uses it (with pH) for the speciation, and calculates HCO3 and CO3 from it unless you enter them.',
@@ -147,10 +203,12 @@ def template_bytes():
             'If total alkalinity is filled it is used. Otherwise bicarbonate + carbonate alkalinity, otherwise HCO3 + CO3 (next columns), otherwise DIC. The alkalinity columns are always mg/L as CaCO3, whatever unit is chosen for the ions.',
             'Optional. Bicarbonate as the ion, in the same unit as the other ions, if you already have it (e.g. from the lab report). Used as given. Leave blank to have PHREEQC calculate it.',
             'Optional. Carbonate as the ion, same unit as the other ions. Used as given. If both HCO3 and CO3 are blank, PHREEQC calculates both. If only one is entered, the other is the rest of the alkalinity (HCO3 + 2 CO3 = alkalinity, in meq/L), so carbonate is not counted twice. A CO3 below detection can be entered as 0 or as <LOR.',
-            'Nitrate and ammonium (total ammonia), as the ion or as N (tell the app which). Lab reports usually give NO3-N and NH3-N, i.e. as N.',
+            'Nitrate, nitrite and ammonium (total ammonia), as the ion or as N (tell the app which, one choice for all three). Lab reports usually give NO3-N, NO2-N and NH3-N, i.e. as N. Nitrite is optional.',
             'Phosphate (filterable reactive phosphorus), as PO4 or as P (tell the app which).',
-            'Silica as SiO2. Neutral, so if the unit is meq/L enter it in mmol/L.',
+            'Silica as SiO2. Neutral, so if the unit is meq/L enter it in mmol/L. If your report gives silicon, add a column called Si instead and leave SiO2 blank: it is converted.',
             'Boron, as B. Optional; used for the drinking water and irrigation guidelines. Neutral, so if the unit is meq/L enter it in mmol/L.',
+            'Optional minor and trace constituents, as the element, in the same unit as the other ions (trace metals are often reported in ug/L: divide by 1000 for mg/L). They go into the PHREEQC speciation. Li, Zn, Cu, Cd and Pb are counted in the charge balance; Al is not (its charge depends on pH). Delete the columns you do not need.',
+            'Optional trace constituents, as the element, same unit. Not in the phreeqc.dat database, so they are not in the speciation; they are carried through to the tables, plots and statistics. Ni and I are counted in the charge balance; the others are not. If the unit is meq/L, enter As, Cr, Se, U and Hg (and Al) in mmol/L.',
             'Optional matplotlib colour for this row (e.g. #0089d0). Blank = automatic by Label.',
             'Optional matplotlib marker for this row (e.g. o, s, ^, D). Blank = automatic by Label.',
             'Any extra numeric column (depth, d18O, 87Sr/86Sr ...) is carried through and can be plotted.',
@@ -242,6 +300,9 @@ def example_data():
         df.loc[g, 'Lon'] = (lon0 + loc.normal(0, 0.07, g.sum())).round(4)
         df.loc[g, 'Screen_depth'] = loc.uniform(d0, d1, g.sum()).round(0)
     df.loc[24, 'Screen_depth'] = np.nan    # one sample with no depth
+    # the optional minor and trace constituents are left blank in the example
+    for c in OPTIONAL:
+        df[c] = np.nan
     return df[TEMPLATE_COLS]
 
 
@@ -376,6 +437,11 @@ def to_mmol(df, unit, n_as_n=False, p_as_p=False, dic_unit='mg/L as C'):
         else:
             mmol[a] = x / abs(z) if z != 0 else x
 
+    # silica entered as silicon (a column called Si) is used where SiO2 is blank
+    if 'Si' in df.columns:
+        si = pd.to_numeric(df['Si'], errors='coerce')
+        mmol['SiO2'] = mmol['SiO2'].where(mmol['SiO2'].notna(), si / MW_SI if unit == 'mg/L' else si)
+
     # alkalinity in meq/L: total if given, otherwise bicarbonate + carbonate.
     # the as CaCO3 columns are always mg/L
     total = df['Total_Alk_CaCO3'].astype(float) / CACO3_PER_MEQ
@@ -411,6 +477,7 @@ def to_mmol(df, unit, n_as_n=False, p_as_p=False, dic_unit='mg/L as C'):
         if n_as_n:
             mmol['NO3'] = df['NO3'].astype(float) / MW_N
             mmol['NH4'] = df['NH4'].astype(float) / MW_N
+            mmol['NO2'] = df['NO2'].astype(float) / MW_N
         if p_as_p:
             mmol['PO4'] = df['PO4'].astype(float) / MW_P
     return mmol, source
@@ -465,6 +532,7 @@ def run_phreeqc(df, mmol, pp):
     #   CO3  = CO3-2 plus its ion pairs (CaCO3, MgCO3, NaCO3- ...)
     # so HCO3 + 2*CO3 is the carbonate alkalinity
     mmol = mmol.copy()
+    keys = phreeqc_keys(pp)
     out = pd.DataFrame(index=df.index, dtype=float)
     cols = ['SI ' + m for m in MINERALS] + ['log pCO2', 'DIC (mmol/L)', 'Ionic strength (mol/kgw)',
                                             'SC calc (uS/cm)']
@@ -480,8 +548,8 @@ def run_phreeqc(df, mmol, pp):
             continue
         sol = {'units': 'mmol/l', 'pH': float(df.at[i, 'pH']),
                'temp': float(df.at[i, 'Temp']) if pd.notna(df.at[i, 'Temp']) else 25.0}
-        for a, (_, _, key) in ANALYTES.items():
-            if key is not None and pd.notna(row[a]) and row[a] > 0:
+        for a, key in keys.items():
+            if pd.notna(row[a]) and row[a] > 0:
                 sol[key] = float(row[a])
         if alk > 0:
             sol['Alkalinity'] = float(alk)
@@ -515,10 +583,14 @@ def run_phreeqc(df, mmol, pp):
         for m, needs in MINERALS.items():
             have = [max(alk, dic) if n == 'HCO3' else row[n] for n in needs]
             if all(pd.notna(x) and x > 0 for x in have):
-                si = s.si(m)
+                try:
+                    si = s.si(m)
+                except Exception:      # the mineral is not in this database
+                    si = -999.0
                 out.at[i, 'SI ' + m] = si if si > -99 else np.nan
         out.at[i, 'Ionic strength (mol/kgw)'] = s.I
-        out.at[i, 'SC calc (uS/cm)'] = s.sc
+        # 0 means the database has no conductivity data (wateq4f)
+        out.at[i, 'SC calc (uS/cm)'] = s.sc if s.sc > 0 else np.nan
         s.forget()
 
     # entered HCO3 and CO3 replace the calculated values. If only one is entered,
@@ -535,6 +607,50 @@ def run_phreeqc(df, mmol, pp):
     mmol.loc[c_only, 'CO3'] = c[c_only]
     mmol.loc[c_only, 'HCO3'] = (alk - 2 * c).clip(lower=0)[c_only]
     return out, pd.DataFrame(errors, columns=['Sample', 'Error']), mmol
+
+
+# %% databases
+# phreeqc.dat is the default. pitzer.dat (for saline water and brines) ships with phreeqpython;
+# wateq4f.dat (more trace elements) is the USGS file, in hydrochem_workbench/data
+DATABASES = {'phreeqc.dat': 'phreeqc.dat (fresh water; the default)',
+             'wateq4f.dat': 'wateq4f.dat (fresh water, more trace elements)',
+             'pitzer.dat': 'pitzer.dat (saline water and brines)'}
+# constituents that are not in phreeqc.dat but are in wateq4f.dat, and are not redox sensitive
+_OTHER_KEYS = {'Ni': 'Ni', 'I': 'I'}
+
+
+def database_elements(name):
+    # the elements a database defines (its SOLUTION_MASTER_SPECIES)
+    from pathlib import Path
+    import phreeqpython
+    own = Path(__file__).resolve().parent / 'data' / name
+    path = own if own.exists() else Path(phreeqpython.__file__).resolve().parent / 'database' / name
+    text = path.read_text(errors='ignore')
+    start = text.index('SOLUTION_MASTER_SPECIES')
+    block = text[start:text.index('SOLUTION_SPECIES', start + 30)]
+    return {line.split()[0].split('(')[0] for line in block.splitlines()[1:] if line.split('#')[0].split()}
+
+
+def phreeqc_keys(pp):
+    # {analyte: PHREEQC name} for the constituents this database can take.
+    # pp.hw_elements is set by workflow.get_phreeqc(); without it the database is taken to be phreeqc.dat
+    elements = getattr(pp, 'hw_elements', None)
+    keys = {}
+    for a, (_, _, key) in ANALYTES.items():
+        if key is None and elements is not None:
+            key = _OTHER_KEYS.get(a)
+        if key == 'Amm' and elements is not None and 'Amm' not in elements:
+            key = 'N(-3)'      # phreeqc.dat keeps ammonium apart from the nitrogen redox system; others do not
+        if key is not None and (elements is None or key.split('(')[0] in elements):
+            keys[a] = key
+    return keys
+
+
+def left_out_of_speciation(df, pp):
+    # the constituents the dataset has that this database cannot take (they stay in the tables and plots)
+    keys = phreeqc_keys(pp)
+    return [a for a in ANALYTES if a not in keys and a not in ('HCO3', 'CO3') and a in df.columns
+            and pd.to_numeric(df[a], errors='coerce').notna().any()]
 
 
 # %% the whole calculation for one dataset
@@ -631,11 +747,13 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
     for a, (mw, z, _) in ANALYTES.items():
         meq[a] = mmol[a] * abs(z)
         mgl[a] = mmol[a] * mw
+    shown = [a for a in ANALYTES if a not in OPTIONAL or mmol[a].notna().any()]
+    for a in shown:
         v[f'{a} (mmol/L)'] = mmol[a]
-    for a, (mw, z, _) in ANALYTES.items():
-        if z != 0:
+    for a in shown:
+        if ANALYTES[a][1] != 0:
             v[f'{a} (meq/L)'] = meq[a]
-    for a in ANALYTES:
+    for a in shown:
         v[f'{a} (mg/L)'] = mgl[a]
 
     # forms used by the water quality guidelines
@@ -643,7 +761,13 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
     v['NH4-N (mg/L)'] = mmol['NH4'] * MW_N
     v['Ammonia as NH3 (mg/L)'] = mmol['NH4'] * MW_NH3
     v['PO4-P (mg/L)'] = mmol['PO4'] * MW_P
+    if mmol['NO2'].notna().any():
+        v['NO2-N (mg/L)'] = mmol['NO2'] * MW_N
     v['Hardness (mg/L as CaCO3)'] = (mmol['Ca'] + mmol['Mg'].fillna(0)) * 100.087
+    # the same hardness in French, German and English (Clark) degrees
+    v['Hardness (°fH)'] = v['Hardness (mg/L as CaCO3)'] / 10.0
+    v['Hardness (°dH)'] = v['Hardness (mg/L as CaCO3)'] / 17.848
+    v['Hardness (°e)'] = v['Hardness (mg/L as CaCO3)'] / 14.254
     v['Alkalinity (meq/L)'] = mmol['Alk']
     v['Alkalinity (mg/L as CaCO3)'] = mmol['Alk'] * CACO3_PER_MEQ
 
@@ -694,8 +818,16 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
     # irrigation: sodium adsorption ratio and percent sodium (meq)
     v['SAR'] = meq['Na'] / np.sqrt((meq['Ca'] + meq['Mg']) / 2).where(lambda z: z > 0)
     v['Na (%)'] = _ratio(meq['Na'] + k0, meq['Ca'] + meq['Mg'] + meq['Na'] + k0) * 100
-    # chloro-alkaline index (CAI-1)
+    # chloro-alkaline indices (Schoeller): CAI-1 and CAI-2
+    c0, n0 = meq['CO3'].fillna(0), meq['NO3'].fillna(0)
     v['CAI-1'] = _ratio(meq['Cl'] - (meq['Na'] + k0), meq['Cl'])
+    v['CAI-2'] = _ratio(meq['Cl'] - (meq['Na'] + k0), meq['SO4'] + meq['HCO3'] + c0 + n0)
+    # irrigation indices (meq/L): residual sodium carbonate (Eaton, 1950), Kelly's ratio (Kelly, 1940),
+    # permeability index (Doneen, 1964) and magnesium hazard (Szabolcs and Darab, 1964)
+    v['RSC (meq/L)'] = (meq['HCO3'] + c0) - (meq['Ca'] + meq['Mg'])
+    v['Kelly ratio'] = _ratio(meq['Na'], meq['Ca'] + meq['Mg'])
+    v['Permeability index (%)'] = _ratio(meq['Na'] + np.sqrt(meq['HCO3']), meq['Ca'] + meq['Mg'] + meq['Na']) * 100
+    v['Magnesium hazard (%)'] = _ratio(meq['Mg'], meq['Ca'] + meq['Mg']) * 100
     # Gibbs ratios use mg/L
     v['Na/(Na+Ca) (mg/L basis)'] = _ratio(mgl['Na'], mgl['Na'] + mgl['Ca'])
     v['Cl/(Cl+HCO3) (mg/L basis)'] = _ratio(mgl['Cl'], mgl['Cl'] + mgl['HCO3'])
@@ -703,6 +835,11 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
     # PHREEQC
     for c in phreeqc.columns:
         v[c] = phreeqc[c]
+    # scaling and corrosion: Langelier (1936) and Ryznar (1944) indices. pHs, the pH at which the water
+    # would be saturated with calcite, comes from the PHREEQC calcite saturation index
+    v['pHs (calcite)'] = df['pH'] - phreeqc['SI Calcite']
+    v['Langelier index'] = df['pH'] - v['pHs (calcite)']
+    v['Ryznar index'] = 2 * v['pHs (calcite)'] - df['pH']
 
     # Piper coordinates and water type
     pc = piper_coords(meq)
@@ -737,8 +874,10 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
 
 
 # %% hollow markers
-_HCO3_DEPENDENT = {'CBE (%)', 'Sum anions (meq/L)', 'TDS calc (mg/L)'}
-_PHREEQC_EXTRA = {'log pCO2', 'DIC (mmol/L)', 'Ionic strength (mol/kgw)', 'SC calc (uS/cm)'}
+_HCO3_DEPENDENT = {'CBE (%)', 'Sum anions (meq/L)', 'TDS calc (mg/L)', 'CAI-2', 'RSC (meq/L)',
+                   'Permeability index (%)'}
+_PHREEQC_EXTRA = {'log pCO2', 'DIC (mmol/L)', 'Ionic strength (mol/kgw)', 'SC calc (uS/cm)', 'pHs (calcite)',
+                  'Langelier index', 'Ryznar index'}
 
 
 def hollow_mask(v, cols):
@@ -768,7 +907,7 @@ def group_means(v):
     # mean of each analyte (mg/L) and TDS for every Label, with the number of values behind each mean.
     # Values that rest on a filled pH, temperature or alkalinity are left out (the same values that
     # are hollow on the plots); below-LOR values count at their replaced value
-    cols = [f'{a} (mg/L)' for a in ANALYTES if v[f'{a} (mg/L)'].notna().any()]
+    cols = [f'{a} (mg/L)' for a in ANALYTES if f'{a} (mg/L)' in v.columns and v[f'{a} (mg/L)'].notna().any()]
     cols += ['TDS (mg/L)']
     means, counts = [], []
     for lab in pd.unique(v['Label']):
@@ -782,6 +921,41 @@ def group_means(v):
         means.append(m)
         counts.append(n)
     return pd.DataFrame(means), pd.DataFrame(counts)
+
+
+STAT_COLS = ['n', 'Missing (%)', 'Min', 'P25', 'Median', 'Mean', 'P75', 'Max', 'SD', 'CV (%)']
+ALL_SAMPLES = 'All samples'
+
+
+def group_stats(v, cols, by_group=True):
+    # descriptive statistics of the chosen columns, for all samples and for each Label
+    # one row for each group and variable. As for the group means, values that rest on a filled pH,
+    # temperature or alkalinity are left out, and below-LOR values count at their replaced value
+    groups = [(ALL_SAMPLES, v)]
+    if by_group and v['Label'].nunique() > 1:
+        groups += [(lab, v[v['Label'] == lab]) for lab in pd.unique(v['Label'])]
+    rows = []
+    for name, g in groups:
+        for c in cols:
+            if c not in g.columns:
+                continue
+            x = pd.to_numeric(g[c], errors='coerce').where(~hollow_mask(g, [c])).dropna()
+            row = {'Group': name, 'Variable': c, 'n': len(x),
+                   'Missing (%)': 100 * (1 - len(x) / len(g)) if len(g) else np.nan}
+            if len(x):
+                q = x.quantile([0.25, 0.5, 0.75])
+                sd = x.std(ddof=1) if len(x) > 1 else np.nan
+                row.update({'Min': x.min(), 'P25': q[0.25], 'Median': q[0.5], 'Mean': x.mean(), 'P75': q[0.75],
+                            'Max': x.max(), 'SD': sd,
+                            'CV (%)': 100 * sd / x.mean() if x.mean() != 0 and pd.notna(sd) else np.nan})
+            rows.append(row)
+    return pd.DataFrame(rows, columns=['Group', 'Variable'] + STAT_COLS)
+
+
+def stat_defaults(v):
+    # the field values and major ions that were measured
+    cols = ['pH', 'EC', 'TDS (mg/L)'] + [f'{a} (mg/L)' for a in MAJORS]
+    return [c for c in cols if c in v.columns and v[c].notna().any()]
 
 
 # %% charge balance check

@@ -408,3 +408,90 @@ def test_charge_balance_check():
     # no interval for a sample: judged on the calculated value
     lo[2] = hi[2] = np.nan
     assert chem.charge_balance_check(v, 5.0, lo, hi)[2] == chem.CB_BEYOND
+
+
+BASE = dict(pH=7.5, Temp=25, Ca=60, Mg=20, Na=40, K=4, Total_Alk_CaCO3=200, Cl=50, SO4=40)
+
+
+def test_minor_and_trace_constituents():
+    # the wider list is in the template, and absent ions leave no columns behind
+    for a in chem.OPTIONAL:
+        assert a in chem.ANALYTES and a in chem.TEMPLATE_COLS
+    plain, _ = run(one_sample(**BASE))
+    assert not [c for c in plain.columns if c.split(' ')[0] in chem.OPTIONAL]
+    full, _ = run(one_sample(**BASE, NO2=0.5, Li=0.05, Al=0.1, Zn=0.2, Cu=0.05, Cd=0.001, Pb=0.005, Ni=0.02, I=0.1,
+                             As=0.01, Cr=0.005, Se=0.002, U=0.003, Hg=0.0005))
+    for a in chem.OPTIONAL:
+        assert full[f'{a} (mg/L)'].iloc[0] == pytest.approx(float(full[f'{a} (mmol/L)'].iloc[0]) * chem.ANALYTES[a][0])
+    # charge balance: Li, Zn, Cu, Cd, Pb, Ni as cations, NO2 and I as anions; Al, As, Cr, Se, U, Hg not counted
+    assert {'Li', 'Zn', 'Cu', 'Cd', 'Pb', 'Ni'} <= set(chem.CATIONS) and {'NO2', 'I'} <= set(chem.ANIONS)
+    assert not {'Al', 'As', 'Cr', 'Se', 'U', 'Hg'} & set(chem.CATIONS + chem.ANIONS)
+    extra_cat = 0.05 / 6.94 + 2 * (0.2 / 65.38 + 0.05 / 63.546 + 0.001 / 112.414 + 0.005 / 207.2 + 0.02 / 58.693)
+    extra_an = 0.5 / 46.005 + 0.1 / 126.904
+    assert full['Sum cations (meq/L)'].iloc[0] - plain['Sum cations (meq/L)'].iloc[0] == pytest.approx(extra_cat, rel=1e-6)
+    # (without Al and the metals: in PHREEQC their hydroxide and carbonate species take up a little of the alkalinity)
+    anions, _ = run(one_sample(**BASE, NO2=0.5, I=0.1))
+    assert anions['Sum anions (meq/L)'].iloc[0] - plain['Sum anions (meq/L)'].iloc[0] == pytest.approx(extra_an, abs=2e-5)
+    assert full['HCO3 (meq/L)'].iloc[0] < plain['HCO3 (meq/L)'].iloc[0]
+    # those in phreeqc.dat reach the speciation (the ionic strength moves), the others do not
+    assert full['Ionic strength (mol/kgw)'].iloc[0] != plain['Ionic strength (mol/kgw)'].iloc[0]
+    only_other, _ = run(one_sample(**BASE, Ni=0.02, I=0.1, As=0.01, Cr=0.005, Se=0.002, U=0.003, Hg=0.0005))
+    assert only_other['Ionic strength (mol/kgw)'].iloc[0] == pytest.approx(plain['Ionic strength (mol/kgw)'].iloc[0],
+                                                                        rel=1e-12)
+    assert only_other['SI Calcite'].iloc[0] == pytest.approx(plain['SI Calcite'].iloc[0], abs=1e-12)
+
+
+def test_nitrite_as_n_and_silicon_column():
+    as_n, _ = run(one_sample(**BASE, NO2=1.0), n_as_n=True)
+    assert as_n['NO2 (mmol/L)'].iloc[0] == pytest.approx(1.0 / chem.MW_N)
+    assert as_n['NO2-N (mg/L)'].iloc[0] == pytest.approx(1.0)
+    as_ion, _ = run(one_sample(**BASE, NO2=1.0))
+    assert as_ion['NO2 (mmol/L)'].iloc[0] == pytest.approx(1.0 / 46.005)
+    # silica given as silicon, in a column called Si
+    raw = one_sample(**BASE)
+    raw['Si'] = 10.0
+    si, _ = run(raw)
+    assert si['SiO2 (mg/L)'].iloc[0] == pytest.approx(10.0 * 60.084 / 28.0855)
+    raw['SiO2'] = 30.0                       # SiO2 wins where both are given
+    both, _ = run(raw)
+    assert both['SiO2 (mg/L)'].iloc[0] == pytest.approx(30.0)
+
+
+def test_irrigation_indices_and_hardness_units():
+    v, _ = run(one_sample(pH=7.5, Temp=25, Ca=2.0, Mg=1.0, Na=3.0, K=0.5, HCO3=4.0, CO3=0.0, Cl=2.0, SO4=0.5, NO3=0.2),
+               'meq/L')
+    r = v.iloc[0]
+    assert r['RSC (meq/L)'] == pytest.approx(4.0 - 3.0)
+    assert r['Kelly ratio'] == pytest.approx(3.0 / 3.0)
+    assert r['Permeability index (%)'] == pytest.approx((3.0 + 2.0) / 6.0 * 100)
+    assert r['Magnesium hazard (%)'] == pytest.approx(100 / 3)
+    assert r['CAI-1'] == pytest.approx((2.0 - 3.5) / 2.0)
+    assert r['CAI-2'] == pytest.approx((2.0 - 3.5) / (0.5 + 4.0 + 0.0 + 0.2))
+    hard = r['Hardness (mg/L as CaCO3)']
+    assert hard == pytest.approx(1.5 * 100.087)
+    assert r['Hardness (°fH)'] == pytest.approx(hard / 10) and r['Hardness (°dH)'] == pytest.approx(hard / 17.848)
+    assert r['Hardness (°e)'] == pytest.approx(hard / 14.254)
+    # these rest on HCO3, so a filled alkalinity makes them hollow
+    assert {'CAI-2', 'RSC (meq/L)', 'Permeability index (%)'} <= chem._HCO3_DEPENDENT
+
+
+def test_group_stats():
+    import phreeqpython
+    df, dropped, extra, problems = chem.clean(chem.example_data())
+    v, _ = chem.derive(df, phreeqpython.PhreeqPython(database='phreeqc.dat'), extra_cols=tuple(extra))
+    cols = chem.stat_defaults(v)
+    assert cols[0] == 'pH' and 'TDS (mg/L)' in cols and 'Ca (mg/L)' in cols and 'EC' not in cols   # no EC in the example
+    t = chem.group_stats(v, ['pH', 'Ca (mg/L)', 'not a column'])
+    assert list(t.columns) == ['Group', 'Variable'] + chem.STAT_COLS
+    assert list(pd.unique(t['Group'])) == [chem.ALL_SAMPLES] + list(pd.unique(v['Label']))
+    assert set(t['Variable']) == {'pH', 'Ca (mg/L)'}
+    ca = t[(t['Group'] == chem.ALL_SAMPLES) & (t['Variable'] == 'Ca (mg/L)')].iloc[0]
+    x = v['Ca (mg/L)']
+    assert ca['n'] == 26 and ca['Missing (%)'] == 0
+    assert ca['Mean'] == pytest.approx(x.mean()) and ca['Median'] == pytest.approx(x.median())
+    assert ca['SD'] == pytest.approx(x.std()) and ca['P25'] == pytest.approx(x.quantile(0.25))
+    assert ca['Min'] == x.min() and ca['Max'] == x.max()
+    # the filled pH is left out, as for the group means
+    ph = t[(t['Group'] == chem.ALL_SAMPLES) & (t['Variable'] == 'pH')].iloc[0]
+    assert ph['n'] == 25 and ph['Missing (%)'] == pytest.approx(100 / 26)
+    assert len(chem.group_stats(v, ['pH'], by_group=False)) == 1

@@ -510,3 +510,93 @@ def test_charge_balance_options(tmp_path, monkeypatch):
     assert int(note[0].split()[0]) <= 4
     at.radio[0].set_value('Piper').run()
     assert not at.exception
+
+
+def test_descriptive_statistics(tmp_path, monkeypatch):
+    from hydrochem_workbench import chem
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.checkbox[0].check().run()
+    assert not at.exception
+    stats = [d.value for d in at.dataframe if list(d.value.columns[:2]) == ['Group', 'Variable']]
+    assert len(stats) == 1 and set(stats[0]['Group']) == {chem.ALL_SAMPLES} | set(chem.example_data()['Label'])
+    at.multiselect(key='opt_stat_vars').set_value(['pH', 'SAR', 'RSC (meq/L)', 'Hardness (°dH)']).run()
+    at.checkbox(key='opt_stat_groups').uncheck().run()
+    assert not at.exception
+    stats = [d.value for d in at.dataframe if list(d.value.columns[:2]) == ['Group', 'Variable']][0]
+    assert list(stats['Variable']) == ['pH', 'SAR', 'RSC (meq/L)', 'Hardness (°dH)']
+    # nitrite shares the as-N switch
+    assert [s for s in at.selectbox if s.label == 'NO3, NO2 and NH4 columns hold']
+
+
+def test_quality_views_and_databases(tmp_path, monkeypatch):
+    # irrigation, scaling, analysis checks, outliers, below-LOR statistics, the CCME index, PCA outliers
+    # and the other PHREEQC databases
+    import numpy as np
+    from hydrochem_workbench import chem, maps
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    monkeypatch.setattr(maps, 'fetch_basemap', lambda extent, zoom: (np.full((60, 80, 4), 120, dtype=np.uint8), extent))
+    data = chem.example_data().astype(object)
+    data.loc[[0, 1, 2, 5, 9], 'Br'] = '<0.5'
+    data['EC'] = [500 + 40 * k for k in range(len(data))]
+    monkeypatch.setattr(chem, 'example_data', lambda: data.copy())
+
+    at = AppTest.from_file(APP, default_timeout=240)
+    at.run()
+    at.checkbox[0].check().run()
+    assert not at.exception and len(at.error) == 0
+    heads = [h.value for h in at.subheader]
+    for name in ('Statistics with values below the LOR', 'Analysis checks', 'Outliers, one variable at a time'):
+        assert name in heads
+    tables = [d.value for d in at.dataframe]
+    assert any('Method' in t.columns and set(t['Variable']) == {'Br'} for t in tables)
+    assert any('EC calculated / measured' in t.columns for t in tables)
+    assert any(list(t.columns[:3]) == ['Sample', 'Label', 'Variable'] and 'Modified z' in t.columns for t in tables)
+
+    def go(view):
+        at.radio[0].set_value(view).run()
+        assert not at.exception and len(at.error) == 0
+
+    go('Guidelines')
+    assert 'CCME water quality index' in [h.value for h in at.subheader]
+    assert any('CCME WQI' in d.value.columns for d in at.dataframe)
+    assert any('debated' in e.label for e in at.expander)
+    go('Irrigation')
+    assert any({'USSL class', 'Wilcox diagram field', 'Wilcox table grade'} <= set(d.value.columns) for d in at.dataframe)
+    at.radio(key='opt_irr_plot').set_value('Wilcox diagram (EC and percent sodium)').run()
+    assert not at.exception
+    go('Scaling')
+    assert any('Ryznar index' in d.value.columns for d in at.dataframe)
+    go('PCA')
+    assert at.checkbox(key='opt_pca_mark').value is True
+    at.checkbox(key='opt_pca_drop').check().run()
+    assert not at.exception
+    at.checkbox(key='opt_pca_mark').uncheck().run()
+    assert not at.exception
+
+    go('Export')
+    [b for b in at.button if b.label == 'Build a zip of every figure'][0].click().run()
+    assert not at.exception
+    names = at.session_state['zip_contents']
+    for name in ('irrigation/ussl.png', 'irrigation/wilcox.png', 'irrigation/langelier_index.png',
+                 'checks/analysis_checks.png', 'checks/ccme_wqi.png'):
+        assert name in names, name
+
+    # the EC unit: the EC of this dataset is in uS/cm, so any other choice is warned about and names uS/cm
+    assert not [w for w in at.warning if 'Measured EC' in w.value]
+    for ec_unit in ('mS/cm', 'mS/m'):
+        at.selectbox(key='opt_ec_unit').select(ec_unit).run()
+        assert not at.exception and len(at.error) == 0
+        assert [w for w in at.warning if 'Measured EC' in w.value and 'look like µS/cm' in w.value]
+    at.selectbox(key='opt_ec_unit').select('uS/cm').run()
+    assert not at.exception and not [w for w in at.warning if 'Measured EC' in w.value]
+
+    # the other databases
+    for db in ('wateq4f.dat', 'pitzer.dat', 'phreeqc.dat'):
+        at.selectbox(key='opt_database').select(db).run()
+        assert not at.exception and len(at.error) == 0
+        left_out = [i.value for i in at.info if 'left out of the speciation' in i.value]
+        assert bool(left_out) == (db == 'pitzer.dat')
+        saline = [w.value for w in at.warning if 'ionic strength above' in w.value]
+        assert not (saline and db == 'pitzer.dat')

@@ -25,9 +25,17 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    alkalinity in meq/L). The results table says where each came from. With no
    alkalinity columns, HCO3 + CO3 are converted to alkalinity for PHREEQC. Where there is no alkalinity, DIC (mg/L as C
    or mmol/L) can be given instead and PHREEQC works from DIC and pH. Nitrate
-   and ammonium can be as the ion or as N, phosphate as PO4 or as P. Any extra
-   numeric column (depth, isotopes) is carried through and can be plotted.
+   nitrite and ammonium can be as the ion or as N, phosphate as PO4 or as P.
+   Optional minor and trace constituents: Li, Al, Zn, Cu, Cd and Pb (in
+   phreeqc.dat, so they go into the speciation) and Ni, I, As, Cr, Se, U and Hg
+   (carried through to the tables, plots and statistics). Li, Zn, Cu, Cd, Pb, Ni,
+   NO2 and I are counted in the charge balance; Al, As, Cr, Se, U and Hg are
+   not, as their charge depends on pH or redox state. Silica can be given as
+   SiO2 or, in a column called `Si`, as silicon. Any extra numeric column
+   (depth, isotopes) is carried through and can be plotted.
    `Lat`, `Lon` and `Screen_depth` are optional and used for the map.
+   EC can be in uS/cm, mS/cm (dS/m) or mS/m; it is converted to uS/cm, and the
+   app warns if the EC and the ions point to a different unit.
 2. **Missing values.** Missing pH, temperature and alkalinity are filled (dataset
    mean, a fixed value, or for alkalinity the charge-balance value). Filled samples
    are drawn hollow, but only on plots the fill actually affects. Values below
@@ -117,7 +125,29 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
    and keeps every setting (units, below-LOR, missing values, plot options,
    group colours and markers, guidelines), so several sites, or an edited sheet,
    can be run the same way.
-10. **Charge balance.** Each sample is checked against a limit on the charge
+10. **Analysis checks.** Beside the charge balance: calculated against measured
+    EC, measured against calculated TDS, TDS to EC, and the ion sums against EC,
+    with the acceptance ranges of APHA Standard Methods 1030E. Outliers are
+    listed one variable at a time (modified z-score) and, on the PCA view, for
+    all variables together (robust Mahalanobis distance), where they can be
+    marked or left out. For variables with values below the LOR, a table gives
+    the mean, SD and quartiles by substitution, by regression on order
+    statistics (ROS) and by Kaplan-Meier.
+11. **Irrigation and scaling.** The Irrigation view has SAR, percent sodium, RSC,
+    Kelly ratio, magnesium hazard and permeability index with their classes,
+    and the USSL (Richards 1954) and Wilcox (1948) diagrams. Each sample gets
+    the field it falls in on the Wilcox diagram and, separately, the grade from
+    the table in the same bulletin, which is stricter for fresh, sodium-rich
+    water. The Scaling view
+    has the Langelier and Ryznar indices, with pHs taken from the PHREEQC
+    calcite saturation index. The Guidelines view can also give the CCME Water
+    Quality Index for a chosen guideline set, with a note on its limits.
+12. **PHREEQC database.** phreeqc.dat by default; wateq4f.dat (adds Ni and I to
+    the speciation; no calculated EC) or pitzer.dat (saline water and brines;
+    no nitrogen, phosphorus, fluoride, aluminium or trace metals) can be chosen.
+    Constituents a database lacks are left out of the speciation and stay in
+    the tables and plots.
+13. **Charge balance.** Each sample is checked against a limit on the charge
     balance error (5 % by default), either on the calculated value or, with the
     uncertainty analysis on, on its 5th to 95th percentile interval (beyond the
     limit only if the whole interval is). Samples beyond the limit are marked
@@ -126,7 +156,7 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
     every plot, the group means and the further analyses, or left alone. All
     samples stay in the tables with a "Charge balance check" column. A sample
     whose alkalinity was filled is "Not assessable".
-11. **Map.** If the template has `Lat` and `Lon` (decimal degrees, optional),
+14. **Map.** If the template has `Lat` and `Lon` (decimal degrees, optional),
     the Map view draws the samples with their group colour and marker over
     satellite imagery (Esri World Imagery) or a white background, with a scale
     bar, north arrow and a locator inset. Marker size can follow `Screen_depth`
@@ -215,6 +245,8 @@ scripts. Other functions in the package may change between versions.
     hydrochem_workbench/advanced.py      mixing, PCA, clusters and group tests
     hydrochem_workbench/plots_advanced.py  their figures
     hydrochem_workbench/uncertainty.py  Monte Carlo uncertainty analysis and its default inputs
+    hydrochem_workbench/quality.py   irrigation classes, scaling, analysis checks, outliers, below-LOR statistics, CCME index
+    hydrochem_workbench/plots_quality.py  their figures (USSL, Wilcox, checks, CCME)
     hydrochem_workbench/usage.py     the usage counter
     examples/         a synthetic dataset and run_workbench.py, the package used from a script
     packages.txt      system font for Streamlit Cloud (Liberation Sans)
@@ -230,6 +262,10 @@ scripts. Other functions in the package may change between versions.
 - Total N and total P are not in the template, so those guideline values are
   not checked. State and site-specific guideline values are not included.
 - The bundled example data are synthetic, including the sample locations.
+- The guideline comparison does not yet cover the trace constituents added in
+  version 0.17.0 (Al, Zn, Cu, Cd, Pb, Ni, As, Cr, Se, U, Hg).
+- Trace metals are entered in the same unit as the other ions. Laboratory
+  reports often give them in ug/L, which has to be converted first.
 - The map is drawn in longitude and latitude, not in a projected coordinate
   system. The scale bar is exact at the latitude of the middle of the map, which
   is fine for a study area but not for a map spanning many degrees of latitude.
@@ -239,6 +275,22 @@ scripts. Other functions in the package may change between versions.
   before using a map with imagery commercially. The capture date of the imagery
   is not known to the app.
 - Town names are not moved to avoid each other or the samples.
+- The curves of the Wilcox diagram pass through points measured from a scan of
+  Figure 1 of Wilcox (1948), good to about 0.5 percent sodium. A sample close to
+  a curve could fall either side. The axis stops at 3,500 uS/cm as in the
+  original; more saline samples are counted in a note on the figure and are all
+  classed unsuitable.
+- Percent sodium on the Wilcox diagram is Na / (Ca + Mg + Na + K), as Wilcox
+  defines it. The `Na (%)` column elsewhere has Na + K on top, the form most
+  later papers use, so the two differ slightly where potassium is high.
+- The irrigation classes assume EC in uS/cm at 25 degrees C. The EC unit is set
+  in the sidebar, and the app warns when the EC and the ions disagree by a
+  factor that looks like a unit, but it cannot tell whether a field reading was
+  temperature compensated.
+- The CCME index treats each group as a site and its samples as visits, which
+  is how it is commonly applied to surveys but not what it was designed for.
+- As, Cr, Se, U and Hg are not passed to PHREEQC under any database, as their
+  redox state is not known from a total concentration.
 
 ## Licence
 
@@ -251,7 +303,7 @@ relied on.
 
 ## How to cite
 
-Irvine, D.J. (2026). Hydrochem Workbench (version 0.16.1)
+Irvine, D.J. (2026). Hydrochem Workbench (version 0.19.0)
 [Web application]. Charles Darwin University. https://hydrochem-workbench.streamlit.app/
 
 Please also cite PHREEQC and WQChartPy (below).
@@ -267,6 +319,9 @@ Please also cite PHREEQC and WQChartPy (below).
 - **Esri World Imagery**, the satellite imagery behind the map. Fetched from
   Esri's server when a map is drawn (not part of this repository) and credited
   on the figure.
+- **wateq4f.dat**, the PHREEQC database from the USGS PHREEQC distribution
+  (public domain), in `hydrochem_workbench/data/`. phreeqc.dat and pitzer.dat
+  come with phreeqpython.
 - **Natural Earth** (public domain), 1:50m country and state outlines for the
   map inset, in `hydrochem_workbench/data/natural_earth_50m.gpkg` with coordinates rounded to
   0.01 degrees.

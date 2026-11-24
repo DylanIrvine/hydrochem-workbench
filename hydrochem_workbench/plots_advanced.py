@@ -203,6 +203,14 @@ def pca_biplot(v, res, a='PC1', b='PC2', means=False):
         ax.axhline(0, color='0.85', lw=0.5, zorder=0)
         ax.axvline(0, color='0.85', lw=0.5, zorder=0)
         plots._scatter(ax, vv, sc[a], sc[b], hollow, styles, legend=False, means=means)
+        # multivariate outliers (set by the app): a black cross over the marker
+        flagged = []
+        if res.get('mark_outliers') and res.get('outliers') is not None:
+            out = res['outliers']
+            flagged = [i for i in out.index[out['Outlier']] if i in sc.index]
+            if flagged:
+                ax.scatter(sc.loc[flagged, a], sc.loc[flagged, b], marker='x', s=45, color='black', linewidths=1.0,
+                           zorder=20)
         reach = np.nanmax(np.abs(sc[[a, b]].to_numpy()))
         arm = np.nanmax(np.hypot(ld[a], ld[b]))
         k = 0.85 * reach / arm if arm > 0 else 1.0
@@ -229,6 +237,8 @@ def pca_biplot(v, res, a='PC1', b='PC2', means=False):
         ax2.set_ylim(0, 100)
         ax2.tick_params(labelsize=6)
         handles = plots._legend_handles(styles, False, means) + plots.ring_handles(vv)
+        if flagged:
+            handles.append(Line2D([], [], ls='', marker='x', color='black', ms=6, label='Multivariate outlier'))
         fig.legend(handles=handles, frameon=False, loc='upper left', bbox_to_anchor=(0.72, 0.5))
     return fig
 
