@@ -462,7 +462,7 @@ def test_irrigation_indices_and_hardness_units():
                'meq/L')
     r = v.iloc[0]
     assert r['RSC (meq/L)'] == pytest.approx(4.0 - 3.0)
-    assert r['Kelly ratio'] == pytest.approx(3.0 / 3.0)
+    assert r['Kelley ratio'] == pytest.approx(3.0 / 3.0)
     assert r['Permeability index (%)'] == pytest.approx((3.0 + 2.0) / 6.0 * 100)
     assert r['Magnesium hazard (%)'] == pytest.approx(100 / 3)
     assert r['CAI-1'] == pytest.approx((2.0 - 3.5) / 2.0)

@@ -822,10 +822,10 @@ def build_table(df, mmol, filled, phreeqc, extra_cols, alk_source=None):
     c0, n0 = meq['CO3'].fillna(0), meq['NO3'].fillna(0)
     v['CAI-1'] = _ratio(meq['Cl'] - (meq['Na'] + k0), meq['Cl'])
     v['CAI-2'] = _ratio(meq['Cl'] - (meq['Na'] + k0), meq['SO4'] + meq['HCO3'] + c0 + n0)
-    # irrigation indices (meq/L): residual sodium carbonate (Eaton, 1950), Kelly's ratio (Kelly, 1940),
+    # irrigation indices (meq/L): residual sodium carbonate (Eaton, 1950), Kelley's ratio (Kelley, 1940),
     # permeability index (Doneen, 1964) and magnesium hazard (Szabolcs and Darab, 1964)
     v['RSC (meq/L)'] = (meq['HCO3'] + c0) - (meq['Ca'] + meq['Mg'])
-    v['Kelly ratio'] = _ratio(meq['Na'], meq['Ca'] + meq['Mg'])
+    v['Kelley ratio'] = _ratio(meq['Na'], meq['Ca'] + meq['Mg'])
     v['Permeability index (%)'] = _ratio(meq['Na'] + np.sqrt(meq['HCO3']), meq['Ca'] + meq['Mg'] + meq['Na']) * 100
     v['Magnesium hazard (%)'] = _ratio(meq['Mg'], meq['Ca'] + meq['Mg']) * 100
     # Gibbs ratios use mg/L

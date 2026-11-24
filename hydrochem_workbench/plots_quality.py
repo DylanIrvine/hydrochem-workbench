@@ -16,7 +16,7 @@ import pandas as pd
 import matplotlib
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
 from hydrochem_workbench import plots, quality as Q
 from hydrochem_workbench.chem import hollow_mask
@@ -154,12 +154,21 @@ def qa_checks(v):
     if not panels:
         return None
     with matplotlib.rc_context(plots.STYLE):
-        fig = Figure(figsize=(17 * CM, 8.5 * CM), dpi=150)
-        any_h = False
+        # the legend runs across the top, over both panels, so the panels get the full width
+        used = {lab: st for lab, st in plots.group_styles(v).items() if (v['Label'] == lab).any()}
+        any_h = any(bool((hollow_mask(v, p[5]) & p[0].notna() & p[1].notna()).any()) for p in panels)
+        handles = plots._legend_handles(used, any_h) + plots.ring_handles(v) + [
+            Line2D([], [], color='0.3', lw=0.7, label='1:1'),
+            Line2D([], [], color='0.3', lw=0.6, ls='--', label='Acceptance range')]
+        longest = max(len(h.get_label()) for h in handles)
+        ncol = 4 if longest <= 22 else 3 if longest <= 32 else 2
+        rows = int(np.ceil(len(handles) / ncol))
+        w, panel_h, bottom, top = 17.0, 6.4, 1.3, 0.25 + 0.47 * rows      # cm
+        h = bottom + panel_h + top
+        fig = Figure(figsize=(w * CM, h * CM), dpi=150)
         for k, (x, y, xl, yl, (lo, hi), cols) in enumerate(panels):
-            ax = fig.add_axes([0.08 + 0.36 * k, 0.15, 0.27, 0.78])
-            styles, hol = _points(ax, v, x, y, cols)
-            any_h |= hol
+            ax = fig.add_axes([0.09 + 0.5 * k, bottom / h, 0.38, panel_h / h])
+            _points(ax, v, x, y, cols)
             ok = x.notna() & y.notna() & (x > 0) & (y > 0)
             lim = [0.8 * float(min(x[ok].min(), y[ok].min())), 1.25 * float(max(x[ok].max(), y[ok].max()))]
             ax.plot(lim, lim, color='0.3', lw=0.7)
@@ -169,11 +178,20 @@ def qa_checks(v):
             ax.set_yscale('log')
             ax.set_xlim(lim)
             ax.set_ylim(lim)
+            # plain numbers, the same on both axes, and fewer in each decade as the range grows.
+            # The default labels of a short log axis run into each other
+            span = lim[1] / lim[0]
+            subs = ((1.0, 2.0, 3.0, 5.0, 7.0) if span < 8 else (1.0, 2.0, 5.0) if span < 40 else
+                    (1.0, 3.0) if span < 1000 else (1.0,))
+            for axis in (ax.xaxis, ax.yaxis):
+                axis.set_major_locator(LogLocator(base=10, subs=subs))
+                axis.set_major_formatter(FuncFormatter(lambda val, _: f'{val:,.10g}'))
+                axis.set_minor_locator(LogLocator(base=10, subs=np.arange(1, 10)))
+                axis.set_minor_formatter(NullFormatter())
             ax.set_xlabel(xl)
             ax.set_ylabel(yl)
-        extra = [Line2D([], [], color='0.3', lw=0.7, label='1:1'),
-                 Line2D([], [], color='0.3', lw=0.6, ls='--', label='Acceptance range')]
-        _legend(fig, v, styles, any_h, extra, x=0.08 + 0.36 * len(panels) - 0.05)
+        fig.legend(handles=handles, frameon=False, loc='upper left', ncol=ncol, columnspacing=1.4,
+                   bbox_to_anchor=(0.085, 1 - 0.1 / h))
     return fig
 
 

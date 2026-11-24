@@ -105,7 +105,7 @@ def test_irrigation_and_scaling_tables(v):
     assert len(t) == len(v) and (t['EC is'] == 'Calculated').all()        # no EC in the example
     assert t['USSL class'].str.match(r'C[1-4]-S[1-4]').all()
     assert set(t['RSC class']) <= {'Safe', 'Marginal', 'Unsuitable'}
-    assert set(t.loc[t['Kelly ratio'] > 1, 'Kelly class']) == {'Unsuitable'}
+    assert set(t.loc[t['Kelley ratio'] > 1, 'Kelley class']) == {'Unsuitable'}
     s = Q.scaling_table(v)
     ok = s['Langelier index'].notna()
     assert ok.sum() >= 20

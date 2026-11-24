@@ -134,7 +134,7 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
     the mean, SD and quartiles by substitution, by regression on order
     statistics (ROS) and by Kaplan-Meier.
 11. **Irrigation and scaling.** The Irrigation view has SAR, percent sodium, RSC,
-    Kelly ratio, magnesium hazard and permeability index with their classes,
+    Kelley ratio, magnesium hazard and permeability index with their classes,
     and the USSL (Richards 1954) and Wilcox (1948) diagrams. Each sample gets
     the field it falls in on the Wilcox diagram and, separately, the grade from
     the table in the same bulletin, which is stricter for fresh, sodium-rich

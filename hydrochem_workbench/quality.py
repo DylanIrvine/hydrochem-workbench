@@ -131,8 +131,8 @@ def irrigation_table(v):
     t['Wilcox table grade'] = wilcox_class(ec, wna)
     t['RSC (meq/L)'] = v['RSC (meq/L)']
     t['RSC class'] = _band(v['RSC (meq/L)'].astype(float), [1.25, 2.5], ['Safe', 'Marginal', 'Unsuitable'])
-    t['Kelly ratio'] = v['Kelly ratio']
-    t['Kelly class'] = _band(v['Kelly ratio'].astype(float), [1.0], ['Suitable', 'Unsuitable'])
+    t['Kelley ratio'] = v['Kelley ratio']
+    t['Kelley class'] = _band(v['Kelley ratio'].astype(float), [1.0], ['Suitable', 'Unsuitable'])
     t['Magnesium hazard (%)'] = v['Magnesium hazard (%)']
     t['Magnesium class'] = _band(v['Magnesium hazard (%)'].astype(float), [50.0], ['Suitable', 'Hazard'])
     t['Permeability index (%)'] = v['Permeability index (%)']
@@ -149,7 +149,7 @@ IRRIGATION_TEXT = (
     '3000 uS/cm, and 20, 40, 60 and 80 percent sodium. Here the poorer of the two limits decides, which makes '
     'the table grade stricter than the diagram for fresh, sodium-rich water. Percent sodium for both is '
     'Na / (Ca + Mg + Na + K) in meq/L, as Wilcox defines it. The classes assume EC at 25 C. '
-    'RSC below 1.25 meq/L safe, above 2.5 unsuitable (Eaton, 1950). Kelly ratio above 1 unsuitable '
+    'RSC below 1.25 meq/L safe, above 2.5 unsuitable (Eaton, 1950). Kelley ratio above 1 unsuitable '
     '(Kelley, 1940). Magnesium hazard above 50 % (Szabolcs and Darab, 1964). Permeability index: Class I above '
     '75 %, Class III below 25 % (Doneen, 1964). These are screening classes from mid twentieth century work on '
     'arid-zone soils; they take no account of soil type, drainage, crop or rainfall, and several of them repeat '
