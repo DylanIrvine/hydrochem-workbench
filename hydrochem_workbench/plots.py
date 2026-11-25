@@ -1127,6 +1127,38 @@ def _gibbs_field(ax, outline):
 _FIT_TO_DATA = {'pH'}
 
 
+def axis_label(col):
+    # the default axis label for a column; ratios without a unit are molar
+    return pretty(col) + (' (molar)' if '/' in col and '(' not in col else '')
+
+
+def user_label(text):
+    # an axis label typed by the user, or None if blank. $...$ is matplotlib maths text (e.g.
+    # d$^{18}$O); if it does not parse (an odd number of $, a typo) the text is shown as typed
+    text = (text or '').strip()
+    if not text:
+        return None
+    try:
+        from matplotlib.mathtext import MathTextParser
+        if text.count('$') % 2:
+            raise ValueError
+        if '$' in text:
+            MathTextParser('path').parse(text)
+        return text
+    except Exception:
+        return text.replace('$', '\\$')
+
+
+def check_limits(lim, log=False):
+    # user axis limits (min, max), each a number or None: drops a value a log axis cannot show (<= 0)
+    # and both when min is not below max. Returns (min or None, max or None)
+    lo, hi = [None if (x is None or not np.isfinite(float(x)) or (log and float(x) <= 0)) else float(x)
+              for x in (tuple(lim) + (None, None))[:2]]
+    if lo is not None and hi is not None and lo >= hi:
+        return None, None
+    return lo, hi
+
+
 def _panel_xlog(panel, log_conc):
     return panel.get('xlog', False) or (log_conc and panel.get('conc', False))
 
@@ -1240,8 +1272,8 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None, means=Fals
         ax.axhline(0, color='0.8', lw=0.5, zorder=0)
         ax.axvline(0, color='0.8', lw=0.5, zorder=0)
 
-    ax.set_xlabel(pretty(panel['x']) + (' (molar)' if '/' in panel['x'] and '(' not in panel['x'] else ''))
-    ax.set_ylabel(pretty(panel['y']) + (' (molar)' if '/' in panel['y'] and '(' not in panel['y'] else ''))
+    ax.set_xlabel(axis_label(panel['x']))
+    ax.set_ylabel(axis_label(panel['y']))
     # plain numbers on log axes
     for axis, log, lim in [(ax.xaxis, xlog, xl), (ax.yaxis, ylog, yl)]:
         if log:
@@ -1369,8 +1401,11 @@ def seawater_slope(x, y):
 
 
 def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zero_line=False,
-           annotate=False, unc=None, means=False, ratio_lines=(), custom_ratio=None, invert_y=False):
-    # user picks x and y. invert_y: y increases downwards (e.g. depth)
+           annotate=False, unc=None, means=False, ratio_lines=(), custom_ratio=None, invert_y=False,
+           xlabel=None, ylabel=None, xlim=(None, None), ylim=(None, None)):
+    # user picks x and y. invert_y: y increases downwards (e.g. depth). xlabel, ylabel: axis labels to
+    # use instead of the column names (blank or None keeps the default). xlim, ylim: (min, max) set by
+    # the user, None for either end left automatic
     # ratio_lines: names from RATIO_LINES, SEAWATER_LINE and CUSTOM_RATIO (the slope is custom_ratio,
     # y:x); one_to_one is the older switch for the 1:1 line
     panel = dict(x=x, y=y, xlog=xlog, ylog=ylog, lines=[], origin=True)
@@ -1393,9 +1428,34 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
     with matplotlib.rc_context(STYLE):
         fig = Figure(figsize=(17 * CM, 10 * CM), dpi=150)
         ax = fig.add_axes([0.1, 0.13, 0.58, 0.83])
-        mappable, hol = _draw_panel(ax, v, panel, styles, False, cvals=cvals, unc=unc, means=means)
+        xlim = check_limits(xlim, xlog)
+        ylim = check_limits(ylim, ylog)
+        x_set = None
+        if xlim != (None, None):
+            # the x limits go in before the reference lines are drawn, so the lines span them; an
+            # end left automatic comes from a scratch drawing of the same panel
+            auto = (None, None)
+            if None in xlim:
+                with matplotlib.rc_context(STYLE):
+                    sfig = Figure(figsize=(17 * CM, 10 * CM), dpi=72)
+                    sax = sfig.add_axes([0.1, 0.13, 0.58, 0.83])
+                    _draw_panel(sax, v, panel, styles, False, unc=unc, means=means)
+                    auto = sax.get_xlim()
+            x_set = (xlim[0] if xlim[0] is not None else auto[0], xlim[1] if xlim[1] is not None else auto[1])
+            if not x_set[0] < x_set[1]:
+                x_set = None
+        mappable, hol = _draw_panel(ax, v, panel, styles, False, cvals=cvals, unc=unc, means=means, xlim=x_set)
+        if ylim != (None, None):
+            lo, hi = ax.get_ylim()
+            lo, hi = (ylim[0] if ylim[0] is not None else lo, ylim[1] if ylim[1] is not None else hi)
+            if lo < hi:
+                ax.set_ylim(lo, hi)
         if invert_y:
             ax.invert_yaxis()
+        if user_label(xlabel):
+            ax.set_xlabel(user_label(xlabel))
+        if user_label(ylabel):
+            ax.set_ylabel(user_label(ylabel))
         if annotate:
             ok = v[x].notna() & v[y].notna()
             for i in v.index[ok]:

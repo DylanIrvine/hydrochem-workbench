@@ -344,3 +344,41 @@ def test_custom_plot_inverted_y(v):
     assert plots.custom(d, 'Cl (mmol/L)', 'Screen_depth').axes[0].get_ylim()[0] <= 5
     assert plots.custom(d, 'Cl (mmol/L)', 'Screen_depth', ylog=True, invert_y=True).axes[0].yaxis_inverted()
     assert ax.get_ylabel() == 'Screen depth (m below surface)'
+
+
+def test_custom_plot_axis_labels(v):
+    d = v.assign(Bore_depth_m=np.linspace(5, 80, len(v)))
+    ax = plots.custom(d, 'Cl (mmol/L)', 'Bore_depth_m', invert_y=True, xlabel='Chloride (mmol/L)',
+                      ylabel='Depth below water surface (m)').axes[0]
+    assert ax.get_xlabel() == 'Chloride (mmol/L)' and ax.get_ylabel() == 'Depth below water surface (m)'
+    # blank keeps the default
+    ax = plots.custom(d, 'Cl (mmol/L)', 'Bore_depth_m', xlabel='  ', ylabel=None).axes[0]
+    assert ax.get_xlabel() == plots.axis_label('Cl (mmol/L)') and ax.get_ylabel() == 'Bore_depth_m'
+    # maths text is kept; text that does not parse is shown as typed, and the figure still draws
+    assert plots.user_label('$\\delta^{18}$O (‰)') == '$\\delta^{18}$O (‰)'
+    for bad in ('Cost in $', '$\\notacommand$ x'):
+        f = plots.custom(d, 'Cl (mmol/L)', 'Bore_depth_m', ylabel=bad)
+        assert plots.fig_png(f, dpi=40)[:4] == b'\x89PNG'
+    assert plots.user_label('Cost in $') == 'Cost in \\$'
+
+
+def test_custom_plot_axis_limits(v):
+    # SI on both axes, so negative values; one or both ends set by the user
+    ax = plots.custom(v, 'SI Calcite', 'SI Dolomite', xlim=(-3, 1), ylim=(None, 2),
+                      ratio_lines=['1:1 (y = x)']).axes[0]
+    assert ax.get_xlim() == (-3, 1) and ax.get_ylim()[1] == 2 and ax.get_ylim()[0] < v['SI Dolomite'].min()
+    # the 1:1 line spans the x range the user set
+    line = [ln for ln in ax.get_lines() if len(ln.get_xdata()) == 50][0]
+    assert line.get_xdata()[0] == pytest.approx(-3) and line.get_xdata()[-1] == pytest.approx(1)
+    lo_auto = plots.custom(v, 'SI Calcite', 'SI Dolomite').axes[0].get_xlim()[0]
+    ax = plots.custom(v, 'SI Calcite', 'SI Dolomite', xlim=(None, 3)).axes[0]
+    assert ax.get_xlim() == pytest.approx((lo_auto, 3))
+    # limits with an inverted y axis are still min and max of the data values
+    ax = plots.custom(v, 'Cl (mmol/L)', 'pH', ylim=(6, 9), invert_y=True).axes[0]
+    assert ax.get_ylim() == (9, 6)
+    # unusable limits are dropped
+    assert plots.check_limits((2, 1)) == (None, None)
+    assert plots.check_limits((-1, 10), log=True) == (None, 10)
+    assert plots.check_limits((None, None)) == (None, None)
+    ax = plots.custom(v, 'Cl (mmol/L)', 'Na (mmol/L)', xlog=True, ylog=True, xlim=(0, 1000)).axes[0]
+    assert ax.get_xlim()[1] == 1000 and ax.get_xlim()[0] > 0

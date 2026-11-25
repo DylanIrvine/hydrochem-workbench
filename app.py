@@ -1039,6 +1039,23 @@ if view == 'Custom plot':
                         help='y increases downwards, e.g. for depth')
     zero = c4.checkbox('y = 0 line', key=opt('opt_custom_zero', False))
     ann = c5.checkbox('Label samples', key=opt('opt_custom_labels', False))
+    # axis labels: typed per variable (so each keeps its own), blank for the default
+    c1, c2 = st.columns(2)
+    lab_help = ('Leave blank for the default. Text between two `$` signs is maths text: `H$_2$O` for a '
+                'subscript, `$\\delta^{18}$O` for a superscript and Greek letter.')
+    xlab = c1.text_input('x axis label', key=opt(f'opt_custom_xlabel|{cx}', ''), placeholder=cx, help=lab_help)
+    ylab = c2.text_input('y axis label', key=opt(f'opt_custom_ylabel|{cy}', ''), placeholder=cy, help=lab_help)
+    # axis limits, per variable like the labels; blank for automatic
+    lims = {}
+    for col, (axn, end, var) in zip(st.columns(4), [('x', 'min', cx), ('x', 'max', cx), ('y', 'min', cy),
+                                                    ('y', 'max', cy)]):
+        lims[axn + end] = col.number_input(f'{axn} {end}', value=None, format='%g', placeholder='auto',
+                                           key=opt(f'opt_custom_{axn}{end}|{var}', None))
+    xlim, ylim = (lims['xmin'], lims['xmax']), (lims['ymin'], lims['ymax'])
+    for name, lim, log in (('x', xlim, xlog), ('y', ylim, ylog)):
+        if plots.check_limits(lim, log) != tuple(None if v is None else float(v) for v in lim):
+            st.caption(f'The {name} limits were not all used: the minimum must be below the maximum'
+                       + (', and both above 0 on a log axis.' if log else '.'))
     c1, c2 = st.columns([3, 1])
     ratio_opts = custom_ratio_options()
     ratios = c1.multiselect('Reference lines (y:x)', ratio_opts,
@@ -1051,7 +1068,8 @@ if view == 'Custom plot':
                    'HCO3, Br, Sr, F), both in the same unit, so it is not drawn here.')
     fig = plots.custom(vp, cx, cy, xlog=xlog, ylog=ylog, zero_line=zero, annotate=ann,
                        color_by=None if cc.startswith('Group') else cc, unc=mc, means=show_means,
-                       ratio_lines=ratios, custom_ratio=c_ratio, invert_y=inv_y)
+                       ratio_lines=ratios, custom_ratio=c_ratio, invert_y=inv_y, xlabel=xlab, ylabel=ylab,
+                       xlim=xlim, ylim=ylim)
     show(fig, 'custom_plot', 'dl_custom')
     st.caption('Reference lines run through the origin with slope y/x, in the units on the axes, so ratios are '
                'only stoichiometric when both axes are in mmol/L (molar) or both in meq/L. Some common ones, '
@@ -2020,6 +2038,9 @@ if view == 'Export':
                     zero_line=ss.get('opt_custom_zero', False),
                     ratio_lines=ss.get('opt_custom_ratios', ['1:1 (y = x)'] if ss.get('opt_custom_one') else []),
                     custom_ratio=ss.get('opt_custom_ratio', 1.5), invert_y=ss.get('opt_custom_invert_y', False),
+                    xlabel=ss.get(f'opt_custom_xlabel|{cx}', ''), ylabel=ss.get(f'opt_custom_ylabel|{cy}', ''),
+                    xlim=(ss.get(f'opt_custom_xmin|{cx}'), ss.get(f'opt_custom_xmax|{cx}')),
+                    ylim=(ss.get(f'opt_custom_ymin|{cy}'), ss.get(f'opt_custom_ymax|{cy}')),
                     annotate=ss.get('opt_custom_labels', False), color_by=by('custom_color'), unc=mc,
                     means=show_means))
             # guideline bar chart, as last set on the Guidelines view

@@ -70,7 +70,8 @@ Tests: `pip install -r requirements-dev.txt` then `pytest`.
      diagrams, Gibbs, water-rock process plots, saturation indices against
      TDS, Cl, pH, their own ions and each other, the carbonate system,
      irrigation quality (SAR, percent Na) and quality checks
-   - Custom plot: any variable against any other
+   - Custom plot: any variable against any other, with reference lines (1:1, 2:1, 1:2, seawater, a
+     custom ratio), log or inverted axes, your own axis labels and axis limits
    - Optional group means on the Piper, gallery and custom plots, drawn as a
      larger version of each group's marker (the mean of what is on each axis)
 6. **Uncertainty (optional).** Measurement uncertainty is carried through the

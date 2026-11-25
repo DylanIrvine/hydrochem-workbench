@@ -600,3 +600,32 @@ def test_quality_views_and_databases(tmp_path, monkeypatch):
         assert bool(left_out) == (db == 'pitzer.dat')
         saline = [w.value for w in at.warning if 'ionic strength above' in w.value]
         assert not (saline and db == 'pitzer.dat')
+
+
+def test_custom_plot_options(tmp_path, monkeypatch):
+    # reference lines, inverted y and typed axis labels, each label kept with its own variable
+    monkeypatch.setenv('HYDROCHEM_RUN_COUNT_PATH', str(tmp_path / 'count.json'))
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.checkbox[0].check().run()
+    at.radio[0].set_value('Custom plot').run()
+    assert not at.exception
+    at.multiselect(key='opt_custom_ratios').set_value(['2:1 (y = 2x)', 'Seawater ratio', 'Custom ratio']).run()
+    at.checkbox(key='opt_custom_invert_y').check().run()
+    at.text_input(key='opt_custom_ylabel|Na (mmol/L)').input('Sodium ($\\mu$mol/L)').run()
+    at.text_input(key='opt_custom_xlabel|Cl (mmol/L)').input('Cost in $').run()
+    assert not at.exception and len(at.error) == 0
+    # another y variable starts blank; going back restores its label
+    at.selectbox(key='opt_custom_y').select('Ca (mmol/L)').run()
+    assert at.text_input(key='opt_custom_ylabel|Ca (mmol/L)').value == ''
+    at.selectbox(key='opt_custom_y').select('Na (mmol/L)').run()
+    assert at.text_input(key='opt_custom_ylabel|Na (mmol/L)').value == 'Sodium ($\\mu$mol/L)'
+    assert not at.exception
+    # axis limits, with SI (negative) on x
+    at.selectbox(key='opt_custom_x').select('SI Calcite').run()
+    at.number_input(key='opt_custom_xmin|SI Calcite').set_value(-3).run()
+    at.number_input(key='opt_custom_xmax|SI Calcite').set_value(1).run()
+    at.number_input(key='opt_custom_ymin|Na (mmol/L)').set_value(5).run()
+    at.number_input(key='opt_custom_ymax|Na (mmol/L)').set_value(1).run()     # min above max: ignored
+    assert not at.exception and len(at.error) == 0
+    assert any('y limits were not all used' in c.value for c in at.caption)
