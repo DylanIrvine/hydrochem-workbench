@@ -55,9 +55,25 @@ def _mix_handle():
 
 
 # %% mixing
+def _mixing_xlim(v, res, xc, log):
+    # x limits for a mixing panel: the samples and the end members, padded as autoscaling would
+    x = pd.concat([v[xc].astype(float), res['members'][xc].astype(float)])
+    x = x[x > 0] if log else x.dropna()
+    if x.empty:
+        return None
+    lo, hi = float(x.min()), float(x.max())
+    if log:
+        span = np.log10(hi / lo) if hi > lo else 1.0
+        return 10 ** (np.log10(lo) - 0.05 * span), 10 ** (np.log10(hi) + 0.05 * span)
+    pad = 0.05 * (hi - lo) if hi > lo else (abs(hi) * 0.05 or 1.0)
+    return lo - pad, hi + pad
+
+
 def mixing_panels(v, res, panels, log=False, means=False, letters=None, letters_pos=plots.PANEL_LABEL_POS[0]):
     # panels: list of (x column, y column). End members as stars, the mixing line (2) or
     # triangle (3) dashed; every point inside it can be made by mixing alone
+    # panels with the same x variable share the same x limits (from every sample and end member, so
+    # they are also the same on every page)
     E = res['members']
     n = len(panels)
     if not n:
@@ -92,6 +108,9 @@ def mixing_panels(v, res, panels, log=False, means=False, letters=None, letters_
             if log:
                 ax.set_xscale('log')
                 ax.set_yscale('log')
+            xlim = _mixing_xlim(v, res, xc, log)
+            if xlim is not None:
+                ax.set_xlim(xlim)
             ax.set_xlabel(pretty(xc))
             ax.set_ylabel(pretty(yc))
         if log:

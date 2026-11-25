@@ -1005,8 +1005,9 @@ if view == 'Diagnostic gallery':
     skipped = len(plots.GALLERY[group]) - len(panels)
     if not panels:
         st.info('None of the variables for this set are in the data.')
+    g_xlims = plots.shared_xlims(vp, panels, log_conc, unc=mc, means=show_means) if panels else {}
     for k in range(0, len(panels), PANELS_PER_PAGE):
-        fig = plots.gallery_page(vp, panels[k:k + PANELS_PER_PAGE], log_conc=log_conc,
+        fig = plots.gallery_page(vp, panels[k:k + PANELS_PER_PAGE], log_conc=log_conc, xlims=g_xlims,
                                  letters=letters, letters_pos=letters_pos,
                                  color_by=None if g_color.startswith('Group') else g_color, unc=mc,
                                  means=show_means)
@@ -1031,11 +1032,13 @@ if view == 'Custom plot':
     cx = c1.selectbox('x axis', nc, key=opt('opt_custom_x', 'Cl (mmol/L)' if 'Cl (mmol/L)' in nc else nc[0], nc))
     cy = c2.selectbox('y axis', nc, key=opt('opt_custom_y', 'Na (mmol/L)' if 'Na (mmol/L)' in nc else nc[0], nc))
     cc = c3.selectbox('Colour by', color_opts, key=opt('custom_color', color_opts[0], color_opts))
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     xlog = c1.checkbox('Log x', key=opt('opt_custom_xlog', False))
     ylog = c2.checkbox('Log y', key=opt('opt_custom_ylog', False))
-    zero = c3.checkbox('y = 0 line', key=opt('opt_custom_zero', False))
-    ann = c4.checkbox('Label samples', key=opt('opt_custom_labels', False))
+    inv_y = c3.checkbox('Invert y', key=opt('opt_custom_invert_y', False),
+                        help='y increases downwards, e.g. for depth')
+    zero = c4.checkbox('y = 0 line', key=opt('opt_custom_zero', False))
+    ann = c5.checkbox('Label samples', key=opt('opt_custom_labels', False))
     c1, c2 = st.columns([3, 1])
     ratio_opts = custom_ratio_options()
     ratios = c1.multiselect('Reference lines (y:x)', ratio_opts,
@@ -1048,7 +1051,7 @@ if view == 'Custom plot':
                    'HCO3, Br, Sr, F), both in the same unit, so it is not drawn here.')
     fig = plots.custom(vp, cx, cy, xlog=xlog, ylog=ylog, zero_line=zero, annotate=ann,
                        color_by=None if cc.startswith('Group') else cc, unc=mc, means=show_means,
-                       ratio_lines=ratios, custom_ratio=c_ratio)
+                       ratio_lines=ratios, custom_ratio=c_ratio, invert_y=inv_y)
     show(fig, 'custom_plot', 'dl_custom')
     st.caption('Reference lines run through the origin with slope y/x, in the units on the axes, so ratios are '
                'only stoichiometric when both axes are in mmol/L (molar) or both in meq/L. Some common ones, '
@@ -1783,7 +1786,8 @@ if view == 'Export':
         ('Plots', 'Piper: legend for the coloured fields', 'Yes' if ss.get('opt_piper_legend', False) else 'No'),
         ('Plots', 'Gallery: colour by', ss.get('gallery_color', 'Group (Label)')),
         ('Plots', 'Custom plot', f"x = {ss.get('opt_custom_x', '')}, y = {ss.get('opt_custom_y', '')}, "
-                                 f"colour by {ss.get('custom_color', 'Group (Label)')}"),
+                                 f"colour by {ss.get('custom_color', 'Group (Label)')}"
+                                 + (', y axis inverted' if ss.get('opt_custom_invert_y', False) else '')),
         ('Plots', 'Custom plot: reference lines',
          ', '.join(f"{r} = {ss.get('opt_custom_ratio', 1.5):g}" if r == plots.CUSTOM_RATIO else r
                    for r in ss.get('opt_custom_ratios', [])) or 'None'),
@@ -1989,7 +1993,8 @@ if view == 'Export':
             samples = list(vp['Sample'])
             for k in range(0, len(samples), MAX_STIFF):
                 add(f'classical/stiff_{k // MAX_STIFF + 1}.png',
-                    plots.stiff(vp, samples[k:k + MAX_STIFF], letters=letters, letters_pos=letters_pos))
+                    plots.stiff(vp, samples[k:k + MAX_STIFF], letters=letters, letters_pos=letters_pos,
+                                scale_samples=samples))
             for kind in plots.WQ_DIAGRAMS:
                 fig, note = plots.wqchartpy_figure(vp, kind, letters=letters, letters_pos=letters_pos, unc=mc,
                                                    unc_mode=ss.get('opt_wq_unc', 'Clouds'))
@@ -1998,8 +2003,9 @@ if view == 'Export':
                 add(f'classical/{kind.lower()}.png', fig)
             for gname, gpanels in plots.GALLERY.items():
                 gp = [p for p in gpanels if plots.available(vp, p)]
+                gx = plots.shared_xlims(vp, gp, log_conc, unc=mc, means=show_means)
                 for k in range(0, len(gp), PANELS_PER_PAGE):
-                    f = plots.gallery_page(vp, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc,
+                    f = plots.gallery_page(vp, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc, xlims=gx,
                                           color_by=by('gallery_color'), letters=letters, letters_pos=letters_pos,
                                           unc=mc, means=show_means)
                     fname = gname.lower().replace(' ', '_').replace('/', '-')
@@ -2013,7 +2019,7 @@ if view == 'Export':
                     vp, cx, cy, xlog=ss.get('opt_custom_xlog', False), ylog=ss.get('opt_custom_ylog', False),
                     zero_line=ss.get('opt_custom_zero', False),
                     ratio_lines=ss.get('opt_custom_ratios', ['1:1 (y = x)'] if ss.get('opt_custom_one') else []),
-                    custom_ratio=ss.get('opt_custom_ratio', 1.5),
+                    custom_ratio=ss.get('opt_custom_ratio', 1.5), invert_y=ss.get('opt_custom_invert_y', False),
                     annotate=ss.get('opt_custom_labels', False), color_by=by('custom_color'), unc=mc,
                     means=show_means))
             # guideline bar chart, as last set on the Guidelines view

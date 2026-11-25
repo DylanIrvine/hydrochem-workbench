@@ -320,7 +320,7 @@ def save_figures(result, folder, dpi=300, fmt='png', log_conc=False, means=False
     samples = list(v['Sample'])
     for k in range(0, len(samples), MAX_STIFF):
         add(f'stiff_{k // MAX_STIFF + 1}', plots.stiff(v, samples[k:k + MAX_STIFF], letters=letters,
-                                                       letters_pos=letters_pos))
+                                                       letters_pos=letters_pos, scale_samples=samples))
     for kind in plots.WQ_DIAGRAMS:
         fig, note = plots.wqchartpy_figure(v, kind, letters=letters, letters_pos=letters_pos, unc=mc)
         if note:
@@ -328,10 +328,11 @@ def save_figures(result, folder, dpi=300, fmt='png', log_conc=False, means=False
         add(kind.lower(), fig)
     for gname, gpanels in plots.GALLERY.items():
         gp = [p for p in gpanels if plots.available(v, p)]
+        gx = plots.shared_xlims(v, gp, log_conc, unc=mc, means=means)
         for k in range(0, len(gp), PANELS_PER_PAGE):
             fname = gname.lower().replace(' ', '_').replace('/', '-')
             add(f'gallery_{fname}_{k // PANELS_PER_PAGE + 1}',
-                plots.gallery_page(v, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc, letters=letters,
+                plots.gallery_page(v, gp[k:k + PANELS_PER_PAGE], log_conc=log_conc, xlims=gx, letters=letters,
                                    letters_pos=letters_pos, unc=mc, means=means))
     add('irrigation_ussl', plots_quality.ussl(v))
     add('irrigation_wilcox', plots_quality.wilcox(v))

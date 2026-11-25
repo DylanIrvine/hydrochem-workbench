@@ -104,7 +104,7 @@ _PRETTY = [('HCO3', 'HCO$_3$'), ('SO4', 'SO$_4$'), ('NO3', 'NO$_3$'),
 
 
 # whole-name axis labels: units for the field columns, and the SAR definition
-_LABELS = {'EC': 'EC (µS/cm)', 'Temp': 'Temperature (°C)',
+_LABELS = {'EC': 'EC (µS/cm)', 'Temp': 'Temperature (°C)', 'Screen_depth': 'Screen depth (m below surface)',
            'SAR': 'SAR = Na/$\\sqrt{(Ca+Mg)/2}$\n(ions in meq/L)'}
 
 
@@ -591,8 +591,9 @@ def schoeller(v, unc=None):
 
 
 # %% Stiff
-def stiff(v, samples, ncols=4, letters=None, letters_pos=PANEL_LABEL_POS[0]):
-    # grid of Stiff diagrams, all on the same meq/L scale
+def stiff(v, samples, ncols=4, letters=None, letters_pos=PANEL_LABEL_POS[0], scale_samples=None):
+    # grid of Stiff diagrams, all on the same meq/L scale. scale_samples: the samples that set that scale
+    # (e.g. every sample, when they are split over several pages), otherwise those on this page
     sub = v[v['Sample'].isin(samples)]
     n = len(sub)
     if n == 0:
@@ -601,7 +602,8 @@ def stiff(v, samples, ncols=4, letters=None, letters_pos=PANEL_LABEL_POS[0]):
     nrows = int(np.ceil(n / ncols))
     styles = group_styles(v)
     need = ['Na+K (meq/L)', 'Ca (meq/L)', 'Mg (meq/L)', 'Cl (meq/L)', 'HCO3 (meq/L)', 'SO4 (meq/L)']
-    cmax = float(np.nanmax(sub[need].values)) if sub[need].notna().any().any() else 1.0
+    scl = v[v['Sample'].isin(scale_samples)] if scale_samples is not None else sub
+    cmax = float(np.nanmax(scl[need].values)) if scl[need].notna().any().any() else 1.0
     hollow = hollow_mask(v, ['HCO3 (meq/L)'])
     with matplotlib.rc_context(STYLE):
         fig = Figure(figsize=(17 * CM, (3.6 * nrows + 1.2) * CM), dpi=150)
@@ -1125,9 +1127,14 @@ def _gibbs_field(ax, outline):
 _FIT_TO_DATA = {'pH'}
 
 
-def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None, means=False):
+def _panel_xlog(panel, log_conc):
+    return panel.get('xlog', False) or (log_conc and panel.get('conc', False))
+
+
+def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None, means=False, xlim=None):
+    # xlim: x limits to use instead of the panel's own (so panels with the same x share them)
     x, y = v[panel['x']], v[panel['y']]
-    xlog = panel.get('xlog', False) or (log_conc and panel.get('conc', False))
+    xlog = _panel_xlog(panel, log_conc)
     ylog = panel.get('ylog', False) or (log_conc and panel.get('conc', False))
     if xlog:
         x = x.where(x > 0)
@@ -1174,6 +1181,9 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None, means=Fals
                 else:
                     pad = 0.06 * (max(lim[1], hi) - min(lim[0], lo))
                     lim[0], lim[1] = min(lim[0], lo - pad), max(lim[1], hi + pad)
+    if xlim is not None:
+        xl = list(xlim)
+        ax.set_xlim(xl)
     if panel.get('gibbs', False):
         xl = [0, 1]
         yl = [1, 100000]
@@ -1251,12 +1261,39 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None, means=Fals
     return mappable, hollow & ok
 
 
+def shared_xlims(v, panels, log_conc=False, unc=None, means=False):
+    # x limits shared by every panel with the same x variable (and scale): each panel is drawn on a
+    # scratch axes to get the limits it would set itself, and those are combined
+    # returns {(x column, log): (lo, hi)}
+    out = {}
+    styles = group_styles(v)
+    with matplotlib.rc_context(STYLE):
+        fig = Figure(figsize=(8 * CM, 5 * CM), dpi=72)
+        for p in panels:
+            if not available(v, p):
+                continue
+            ax = fig.add_subplot()
+            _draw_panel(ax, v, p, styles, log_conc, unc=unc, means=means)
+            lo, hi = ax.get_xlim()
+            key = (p['x'], _panel_xlog(p, log_conc))
+            if key in out:
+                lo, hi = min(lo, out[key][0]), max(hi, out[key][1])
+            out[key] = (lo, hi)
+            fig.delaxes(ax)
+    return out
+
+
 def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters_pos=PANEL_LABEL_POS[0],
-                 unc=None, means=False):
+                 unc=None, means=False, share_panels=None, xlims=None):
     # up to 6 panels (2 x 3) with one legend along the bottom
+    # panels with the same x variable share their x limits: xlims from shared_xlims (worked out once for
+    # every page of a gallery set), or worked out here across share_panels, or across this page
     panels = [p for p in panels if available(v, p)]
     if not panels:
         return None
+    if xlims is None:
+        xlims = shared_xlims(v, share_panels if share_panels is not None else panels, log_conc, unc=unc,
+                             means=means)
     n = len(panels)
     nrows = int(np.ceil(n / 2))
     height = 4.6 * nrows + 1.6
@@ -1271,7 +1308,8 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
         any_unc = False
         mappable = None
         for ax, p in zip(axs, panels):
-            m, hol = _draw_panel(ax, v, p, styles, log_conc, cvals=cvals, unc=unc, means=means)
+            m, hol = _draw_panel(ax, v, p, styles, log_conc, cvals=cvals, unc=unc, means=means,
+                                 xlim=xlims.get((p['x'], _panel_xlog(p, log_conc))))
             mappable = m or mappable
             any_hollow = any_hollow or bool(hol.any())
             any_unc = any_unc or ax._has_unc
@@ -1331,8 +1369,8 @@ def seawater_slope(x, y):
 
 
 def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zero_line=False,
-           annotate=False, unc=None, means=False, ratio_lines=(), custom_ratio=None):
-    # user picks x and y
+           annotate=False, unc=None, means=False, ratio_lines=(), custom_ratio=None, invert_y=False):
+    # user picks x and y. invert_y: y increases downwards (e.g. depth)
     # ratio_lines: names from RATIO_LINES, SEAWATER_LINE and CUSTOM_RATIO (the slope is custom_ratio,
     # y:x); one_to_one is the older switch for the 1:1 line
     panel = dict(x=x, y=y, xlog=xlog, ylog=ylog, lines=[], origin=True)
@@ -1356,6 +1394,8 @@ def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zer
         fig = Figure(figsize=(17 * CM, 10 * CM), dpi=150)
         ax = fig.add_axes([0.1, 0.13, 0.58, 0.83])
         mappable, hol = _draw_panel(ax, v, panel, styles, False, cvals=cvals, unc=unc, means=means)
+        if invert_y:
+            ax.invert_yaxis()
         if annotate:
             ok = v[x].notna() & v[y].notna()
             for i in v.index[ok]:

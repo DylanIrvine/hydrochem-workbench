@@ -305,3 +305,42 @@ def test_custom_plot_reference_lines(v):
     labels = [t.get_text() for t in plots.custom(v, 'Cl (mmol/L)', 'Na (mmol/L)', one_to_one=True,
                                                  ratio_lines=['1:1 (y = x)']).axes[0].get_legend().get_texts()]
     assert labels.count('1:1') == 1
+
+
+def test_panels_with_the_same_x_share_limits(pp):
+    # Sr only for some samples: the celestite and strontianite panels have fewer points, but every
+    # panel against pH, on every page, has the same x limits
+    d = chem.example_data()
+    d.loc[d.index[:12], 'Sr'] = np.nan
+    v = hw.run(d, phreeqc=pp).table
+    pan = [p for p in plots.GALLERY['Saturation indices against pH'] if plots.available(v, p)]
+    assert len(pan) > 6
+    lims = {tuple(np.round(ax.get_xlim(), 9)) for page in (pan[:6], pan[6:])
+            for ax in plots.gallery_page(v, page, share_panels=pan).axes if ax.axison}
+    assert len(lims) == 1
+    lo, hi = lims.pop()
+    assert lo < v['pH'].min() and hi > v['pH'].max()
+    # mixing panels all share the first tracer as x, and so its limits, on every page
+    from hydrochem_workbench import plots_advanced as PA
+    cols = ['Cl (mmol/L)', 'Na (mmol/L)', 'Ca (mmol/L)', 'Sr (mmol/L)']
+    choices = ['Group mean: ' + g for g in pd.unique(v['Label'])[:2]]
+    res = A.run_mixing(v, v, choices, cols[:1], cols[1:])
+    figs = [PA.mixing_panels(v, res, [(cols[0], c)]) for c in cols[1:]]
+    assert len({tuple(np.round(f.axes[0].get_xlim(), 9)) for f in figs}) == 1
+    # Stiff pages share one scale when scale_samples is given
+    s = list(v['Sample'])
+    a = plots.stiff(v, s[:4], scale_samples=s).axes[0].get_xlim()
+    b = plots.stiff(v, s[-4:], scale_samples=s).axes[0].get_xlim()
+    assert a == b
+
+
+def test_custom_plot_inverted_y(v):
+    # depth down the y axis
+    d = v.assign(Screen_depth=np.linspace(5, 80, len(v)))
+    ax = plots.custom(d, 'EC calc (uS/cm)' if 'EC calc (uS/cm)' in d else 'Cl (mmol/L)', 'Screen_depth',
+                      invert_y=True).axes[0]
+    lo, hi = ax.get_ylim()
+    assert lo > hi and hi <= 5 and lo >= 80
+    assert plots.custom(d, 'Cl (mmol/L)', 'Screen_depth').axes[0].get_ylim()[0] <= 5
+    assert plots.custom(d, 'Cl (mmol/L)', 'Screen_depth', ylog=True, invert_y=True).axes[0].yaxis_inverted()
+    assert ax.get_ylabel() == 'Screen depth (m below surface)'
