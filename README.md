@@ -289,6 +289,9 @@ scripts. Other functions in the package may change between versions.
   temperature compensated.
 - The CCME index treats each group as a site and its samples as visits, which
   is how it is commonly applied to surveys but not what it was designed for.
+  With more than one group it is given per group only: F1 (scope) counts a
+  variable as failed if it fails in any sample, so a pooled all-samples index
+  is lower than the group values and not comparable with them.
 - As, Cr, Se, U and Hg are not passed to PHREEQC under any database, as their
   redox state is not known from a total concentration.
 

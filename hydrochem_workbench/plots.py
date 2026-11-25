@@ -49,7 +49,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
 from hydrochem_workbench.chem import SEAWATER_MMOL, hollow_mask, CB_RING, CB_LABEL
-from hydrochem_workbench import gibbs_fields
+from hydrochem_workbench import chem, gibbs_fields
 
 CM = 1.0 / 2.54
 
@@ -1080,7 +1080,7 @@ GALLERY = {
     ],
 }
 
-_LINE_STYLES = ['--', ':', '-.']
+_LINE_STYLES = ['--', ':', '-.', (0, (6, 2, 1, 2, 1, 2)), (0, (12, 3))]
 
 
 def available(v, panel):
@@ -1121,6 +1121,10 @@ def _gibbs_field(ax, outline):
     ax.fill(xs, ys, facecolor='0.85', edgecolor='0.4', lw=0.6, ls='--', alpha=0.6, zorder=0)
 
 
+# scatter axes that fit the data at both ends instead of starting at 0
+_FIT_TO_DATA = {'pH'}
+
+
 def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None, means=False):
     x, y = v[panel['x']], v[panel['y']]
     xlog = panel.get('xlog', False) or (log_conc and panel.get('conc', False))
@@ -1142,10 +1146,14 @@ def _draw_panel(ax, v, panel, styles, log_conc, cvals=None, unc=None, means=Fals
         ax.set_yscale('log')
     # set the axis limits from the data before adding reference lines
     if ok.any() and not xlog and not ylog and not panel.get('origin', False):
-        if x[ok].min() >= 0:
-            ax.set_xlim(left=0)
-        if y[ok].min() >= 0 and not panel['y'].startswith(('SI ', 'log ', 'CBE', 'CAI')):
-            ax.set_ylim(bottom=0)
+        # non-negative axes start at 0. fixing one end turns autoscaling off, so pad the other end here
+        # (as margins(0.08) would). pH axes are left to fit the data, padded at both ends: no natural
+        # water is near pH 0, so an axis from 0 is mostly empty
+        if x[ok].min() >= 0 and panel['x'] not in _FIT_TO_DATA:
+            ax.set_xlim(0, float(x[ok].max()) * 1.08 or 1)
+        if (y[ok].min() >= 0 and panel['y'] not in _FIT_TO_DATA
+                and not panel['y'].startswith(('SI ', 'log ', 'CBE', 'CAI'))):
+            ax.set_ylim(0, float(y[ok].max()) * 1.08 or 1)
     ax.margins(0.08)
     ax.autoscale_view()
     xl, yl = list(ax.get_xlim()), list(ax.get_ylim())
@@ -1291,12 +1299,55 @@ def gallery_page(v, panels, log_conc=False, color_by=None, letters=None, letters
 
 
 # %% custom plot
+# reference lines through the origin for the custom plot: name -> slope (y = slope * x)
+RATIO_LINES = {'1:1 (y = x)': 1.0, '2:1 (y = 2x)': 2.0, '1:2 (y = x/2)': 0.5}
+SEAWATER_LINE = 'Seawater ratio'
+CUSTOM_RATIO = 'Custom ratio'
+
+
+def _ion_unit(col):
+    # 'Ca (mmol/L)' -> ('Ca', 'mmol/L'); anything else -> (None, None)
+    if not col.endswith(')') or ' (' not in col:
+        return None, None
+    name, unit = col[:-1].split(' (', 1)
+    return (name, unit) if name in chem.ANALYTES and unit in chem.UNITS else (None, None)
+
+
+def seawater_slope(x, y):
+    # y/x in standard mean seawater, in the unit of the two columns; None unless both are ions with a
+    # seawater value, in the same unit
+    (ix, ux), (iy, uy) = _ion_unit(x), _ion_unit(y)
+    if ix is None or iy is None or ux != uy or ix not in chem.SEAWATER_MGL or iy not in chem.SEAWATER_MGL:
+        return None
+    if ux == 'mg/L':
+        return chem.SEAWATER_MGL[iy] / chem.SEAWATER_MGL[ix]
+    r = SEAWATER_MMOL[iy] / SEAWATER_MMOL[ix]
+    if ux == 'meq/L':
+        zx, zy = abs(chem.ANALYTES[ix][1]), abs(chem.ANALYTES[iy][1])
+        if not (zx and zy):
+            return None
+        r *= zy / zx
+    return r
+
+
 def custom(v, x, y, xlog=False, ylog=False, color_by=None, one_to_one=False, zero_line=False,
-           annotate=False, unc=None, means=False):
+           annotate=False, unc=None, means=False, ratio_lines=(), custom_ratio=None):
     # user picks x and y
+    # ratio_lines: names from RATIO_LINES, SEAWATER_LINE and CUSTOM_RATIO (the slope is custom_ratio,
+    # y:x); one_to_one is the older switch for the 1:1 line
     panel = dict(x=x, y=y, xlog=xlog, ylog=ylog, lines=[], origin=True)
-    if one_to_one:
-        panel['lines'].append(('slope', 1.0, '1:1'))
+    names = list(ratio_lines)
+    if one_to_one and '1:1 (y = x)' not in names:
+        names.insert(0, '1:1 (y = x)')
+    for name in names:
+        if name in RATIO_LINES:
+            panel['lines'].append(('slope', RATIO_LINES[name], name.split(' ')[0]))
+        elif name == SEAWATER_LINE:
+            sw = seawater_slope(x, y)
+            if sw is not None:
+                panel['lines'].append(('slope', sw, f'Seawater ratio ({sw:.3g})'))
+        elif name == CUSTOM_RATIO and custom_ratio is not None and custom_ratio > 0:
+            panel['lines'].append(('slope', float(custom_ratio), f'{custom_ratio:g}:1'))
     if zero_line:
         panel['lines'].append(('h', 0.0, 'y = 0'))
     styles = group_styles(v)

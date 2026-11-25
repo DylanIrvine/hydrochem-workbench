@@ -1021,21 +1021,42 @@ if view == 'Diagnostic gallery':
                 'points, so a wide interval can run off the panel.' if mc is not None else ''))
 
 # %% view: custom
+def custom_ratio_options():
+    return list(plots.RATIO_LINES) + [plots.SEAWATER_LINE, plots.CUSTOM_RATIO]
+
+
 if view == 'Custom plot':
     c1, c2, c3 = st.columns(3)
     nc = numeric_choices
     cx = c1.selectbox('x axis', nc, key=opt('opt_custom_x', 'Cl (mmol/L)' if 'Cl (mmol/L)' in nc else nc[0], nc))
     cy = c2.selectbox('y axis', nc, key=opt('opt_custom_y', 'Na (mmol/L)' if 'Na (mmol/L)' in nc else nc[0], nc))
     cc = c3.selectbox('Colour by', color_opts, key=opt('custom_color', color_opts[0], color_opts))
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4 = st.columns(4)
     xlog = c1.checkbox('Log x', key=opt('opt_custom_xlog', False))
     ylog = c2.checkbox('Log y', key=opt('opt_custom_ylog', False))
-    one = c3.checkbox('1:1 line', key=opt('opt_custom_one', False))
-    zero = c4.checkbox('y = 0 line', key=opt('opt_custom_zero', False))
-    ann = c5.checkbox('Label samples', key=opt('opt_custom_labels', False))
-    fig = plots.custom(vp, cx, cy, xlog=xlog, ylog=ylog, one_to_one=one, zero_line=zero, annotate=ann,
-                       color_by=None if cc.startswith('Group') else cc, unc=mc, means=show_means)
+    zero = c3.checkbox('y = 0 line', key=opt('opt_custom_zero', False))
+    ann = c4.checkbox('Label samples', key=opt('opt_custom_labels', False))
+    c1, c2 = st.columns([3, 1])
+    ratio_opts = custom_ratio_options()
+    ratios = c1.multiselect('Reference lines (y:x)', ratio_opts,
+                            key=opt('opt_custom_ratios', ['1:1 (y = x)'] if ss.get('opt_custom_one') else [],
+                                    ratio_opts))
+    c_ratio = c2.number_input('Custom ratio (y:x)', min_value=0.0, step=0.1, format='%g',
+                              key=opt('opt_custom_ratio', 1.5), disabled=plots.CUSTOM_RATIO not in ratios)
+    if plots.SEAWATER_LINE in ratios and plots.seawater_slope(cx, cy) is None:
+        st.caption('The seawater ratio needs two major ions with a seawater value (Cl, Na, SO4, Mg, Ca, K, '
+                   'HCO3, Br, Sr, F), both in the same unit, so it is not drawn here.')
+    fig = plots.custom(vp, cx, cy, xlog=xlog, ylog=ylog, zero_line=zero, annotate=ann,
+                       color_by=None if cc.startswith('Group') else cc, unc=mc, means=show_means,
+                       ratio_lines=ratios, custom_ratio=c_ratio)
     show(fig, 'custom_plot', 'dl_custom')
+    st.caption('Reference lines run through the origin with slope y/x, in the units on the axes, so ratios are '
+               'only stoichiometric when both axes are in mmol/L (molar) or both in meq/L. Some common ones, '
+               'in mmol/L: Na:Cl 1:1 (halite); Ca:SO4 1:1 (gypsum or anhydrite); Ca:HCO3 1:2 (calcite '
+               'dissolved by carbonic acid); (Ca+Mg):HCO3 1:2 (calcite or dolomite); Na:HCO3 1:1 (albite '
+               'weathering to kaolinite). In meq/L, (Ca+Mg) against (HCO3+SO4) 1:1 is carbonate plus gypsum '
+               'dissolution. The seawater ratio is for standard mean seawater (conservative mixing with, or '
+               'evaporation of, seawater or marine-derived rainfall). These are guides, not fits.')
 
 
 # %% further analyses: shared choices
@@ -1249,7 +1270,8 @@ if view == 'PCA':
             st.info(f"{len(flagged)} multivariate outlier(s), beyond a robust distance of "
                     f"{pca['outlier_limit']:.2f}: " + ', '.join(names[:12]) + (' ...' if len(names) > 12 else '')
                     + ('. They are left out of this PCA.' if pca['outliers_left_out'] else '.'))
-        show(PA.pca_biplot(vp, pca, a, b, means=show_means), 'pca_biplot', 'dl_pca')
+        show(PA.pca_biplot(vp, pca, a, b, means=show_means, letters=letters, letters_pos=letters_pos),
+             'pca_biplot', 'dl_pca')
         if not pca['outlier_note']:
             with st.expander('**Robust distances and about outliers**'):
                 dist = pca['outliers'].copy()
@@ -1762,6 +1784,9 @@ if view == 'Export':
         ('Plots', 'Gallery: colour by', ss.get('gallery_color', 'Group (Label)')),
         ('Plots', 'Custom plot', f"x = {ss.get('opt_custom_x', '')}, y = {ss.get('opt_custom_y', '')}, "
                                  f"colour by {ss.get('custom_color', 'Group (Label)')}"),
+        ('Plots', 'Custom plot: reference lines',
+         ', '.join(f"{r} = {ss.get('opt_custom_ratio', 1.5):g}" if r == plots.CUSTOM_RATIO else r
+                   for r in ss.get('opt_custom_ratios', [])) or 'None'),
         ('Plots', 'Figure zip resolution (dpi)', ss.get('opt_dpi', 300)),
         ('Uncertainty', 'Included', 'Yes' if mc is not None else 'No'),
         ('Uncertainty', 'Method', U.method_text(mc['n'], mc['seed']) if mc is not None else ''),
@@ -1986,7 +2011,9 @@ if view == 'Export':
             if cx in nc and cy in nc:
                 add('custom plots/custom_plot.png', plots.custom(
                     vp, cx, cy, xlog=ss.get('opt_custom_xlog', False), ylog=ss.get('opt_custom_ylog', False),
-                    one_to_one=ss.get('opt_custom_one', False), zero_line=ss.get('opt_custom_zero', False),
+                    zero_line=ss.get('opt_custom_zero', False),
+                    ratio_lines=ss.get('opt_custom_ratios', ['1:1 (y = x)'] if ss.get('opt_custom_one') else []),
+                    custom_ratio=ss.get('opt_custom_ratio', 1.5),
                     annotate=ss.get('opt_custom_labels', False), color_by=by('custom_color'), unc=mc,
                     means=show_means))
             # guideline bar chart, as last set on the Guidelines view
@@ -2045,7 +2072,8 @@ if view == 'Export':
                     a = ss.get('opt_pca_x', 'PC1')
                     b = ss.get('opt_pca_y', 'PC2')
                     add(f'{fa}pca_biplot.png', PA.pca_biplot(vp, pca, a if a in pcs else pcs[0],
-                                                             b if b in pcs else pcs[1], means=show_means))
+                                                             b if b in pcs else pcs[1], means=show_means,
+                                                             letters=letters, letters_pos=letters_pos))
                 except ValueError as err:
                     notes.append(f'PCA: not drawn ({err})')
             if ran['Clusters']:

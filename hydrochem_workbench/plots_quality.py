@@ -199,6 +199,20 @@ def qa_checks(v):
 CCME_COLOURS = {'Excellent': '#0089D0', 'Good': '#0DB14B', 'Fair': '#FCB711', 'Marginal': '#F37021', 'Poor': '#CC004C'}
 
 
+def ccme_label(set_name=''):
+    # 'Drinking water: health (ADWG)' ->
+    # 'CCME Water Quality Index (against ADWG drinking water: health guideline values)'
+    # so the label says the guideline set supplies the thresholds; the index itself is CCME's
+    if not set_name:
+        return 'CCME Water Quality Index'
+    name, source = set_name, ''
+    if name.endswith(')') and ' (' in name:
+        name, source = name[:-1].rsplit(' (', 1)
+    name = name[:1].lower() + name[1:]
+    text = f"against {source + ' ' if source else ''}{name} guideline values"
+    return 'CCME Water Quality Index\n(' + text + ')' if len(text) > 60 else f'CCME Water Quality Index ({text})'
+
+
 def ccme_bars(table, title=''):
     # the index for each group as a bar, on the five CCME categories
     t = table[table['CCME WQI'].notna()]
@@ -224,7 +238,7 @@ def ccme_bars(table, title=''):
         ax.set_yticklabels([f"{g} (n = {n})" for g, n in zip(t['Group'], t['Samples'])])
         ax.set_xlim(0, 100)
         ax.set_ylim(-0.6, len(t) - 0.4)
-        ax.set_xlabel('CCME Water Quality Index' + (f': {title}' if title else ''))
+        ax.set_xlabel(ccme_label(title))
         if not t['Meets CCME minimum'].all():
             fig.text(0.3, 0.01, '* fewer than 4 variables or 4 samples: below the CCME minimum', fontsize=6,
                      color='0.3', va='bottom')

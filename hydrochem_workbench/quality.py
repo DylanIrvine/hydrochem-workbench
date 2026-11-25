@@ -477,11 +477,15 @@ def _ccme_tests(v, rows):
 
 
 def ccme_wqi(v, rows, by_group=True):
-    # CCME Water Quality Index 1.0 (CCME, 2001; 2017) for all samples and for each Label
+    # CCME Water Quality Index 1.0 (CCME, 2001; 2017) for each Label, or for all samples when there is one
+    # Label (or by_group=False). There is no pooled row alongside the groups: F1 counts a variable as failed
+    # if it fails in any sample, so pooling the groups gives a lower score than any of the groups would
+    # suggest, and the pooled value is not comparable with theirs.
     # rows: guideline values (from guidelines.SETS or guidelines.regional_rows)
-    groups = [(chem.ALL_SAMPLES, v)]
     if by_group and v['Label'].nunique() > 1:
-        groups += [(lab, v[v['Label'] == lab]) for lab in pd.unique(v['Label'])]
+        groups = [(lab, v[v['Label'] == lab]) for lab in pd.unique(v['Label'])]
+    else:
+        groups = [(chem.ALL_SAMPLES, v)]
     out = []
     for name, g in groups:
         tests = {k: t for k, t in _ccme_tests(g, rows).items() if t[0].any()}
@@ -511,7 +515,9 @@ CCME_TEXT = (
     'It was designed for repeated sampling of one site, with at least four variables and four sampling visits '
     '(CCME recommends eight or more variables and no more than twenty). Here each group (Label) is treated as '
     'the site and its samples as the visits, which is the common way it is applied to groundwater surveys but '
-    'is not what it was built for.\n\n'
+    'is not what it was built for. With more than one group, no index is given for all samples pooled: F1 '
+    'counts a variable as failed if it fails in any one sample, so pooling groups (and adding samples) lowers '
+    'the score, and the pooled value is not comparable with the group values.\n\n'
     'Views on such indices are divided. In their favour: one number is easy to communicate and to compare. '
     'Against: the score depends on which variables and which guideline set are chosen, so two studies are '
     'rarely comparable; F1 penalises a variable equally for one failure or fifty; a serious exceedance of one '

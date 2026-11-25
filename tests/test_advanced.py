@@ -109,3 +109,23 @@ def test_holm_and_group_tests():
     assert kw.loc[0, 'Groups tested'] == 2                 # c has only 2 values
     assert 'c' in kw.loc[0, 'Groups left out (< 3 values)']
     assert len(pairs) == 1 and pairs.loc[0, 'p (Holm-adjusted)'] < 0.01
+
+
+def test_pca_biplot_panel_letters():
+    from hydrochem_workbench import plots, plots_advanced as PA
+    rng = np.random.default_rng(3)
+    cols = [f'{a} (mmol/L)' for a in ['Ca', 'Mg', 'Na', 'Cl']]
+    X = pd.DataFrame(np.exp(rng.normal(size=(30, 4))), columns=cols)
+    v = X.assign(Sample=[f'S{i}' for i in range(30)], Label=['A', 'B', 'C'] * 10,
+                 Color=['#1f77b4', '#ff7f0e', '#2ca02c'] * 10, Marker=['o', 's', '^'] * 10)
+    p = A.pca(X, A.TRANSFORMS[0])
+    texts = lambda fig: [t.get_text() for ax in fig.axes for t in ax.texts]
+    plain = PA.pca_biplot(v, p)
+    assert '(a)' not in texts(plain) and plain.axes[1].get_ylim() == (0, 100)
+    for pos in plots.PANEL_LABEL_POS:
+        fig = PA.pca_biplot(v, p, letters='(a)', letters_pos=pos)
+        assert '(a)' in [t.get_text() for t in fig.axes[0].texts]
+        assert '(b)' in [t.get_text() for t in fig.axes[1].texts]
+        # the biplot stays square and symmetric; the variance panel gets headroom only for inside letters
+        assert fig.axes[0].get_xlim() == fig.axes[0].get_ylim()
+        assert (fig.axes[1].get_ylim()[1] > 100) == ('inside' in pos)

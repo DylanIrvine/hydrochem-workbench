@@ -222,7 +222,11 @@ def test_ccme_index_by_hand():
 
 def test_ccme_on_example(v):
     w = Q.ccme_wqi(v, guidelines.SETS[guidelines.set_names()[0]])
-    assert list(w['Group']) == [chem.ALL_SAMPLES] + list(pd.unique(v['Label']))
+    # one row per group, with no pooled row (F1 makes a pooled index lower than and not comparable with
+    # the group values); with one group, or by_group=False, a single row for all samples
+    assert list(w['Group']) == list(pd.unique(v['Label']))
+    one = Q.ccme_wqi(v, guidelines.SETS[guidelines.set_names()[0]], by_group=False)
+    assert list(one['Group']) == [chem.ALL_SAMPLES] and one.iloc[0]['Samples'] == len(v)
     assert w['CCME WQI'].between(0, 100).all()
     assert plots.fig_png(PQ.ccme_bars(w, 'test'), dpi=50)[:4] == b'\x89PNG'
     # graded guidelines (FAO irrigation) are left out, so that set gives no index
@@ -254,3 +258,50 @@ def test_databases(v):
     assert p.table['SC calc (uS/cm)'].notna().any()
     # the charge balance does not depend on the database
     assert np.allclose(p.table['Sum cations (meq/L)'], w.table['Sum cations (meq/L)'])
+
+
+def test_ccme_axis_label():
+    # the guideline set supplies the thresholds; the label must not read as an index from that set
+    assert PQ.ccme_label('Drinking water: health (ADWG)') == \
+        'CCME Water Quality Index (against ADWG drinking water: health guideline values)'
+    assert PQ.ccme_label('') == 'CCME Water Quality Index'
+    long = PQ.ccme_label('Aquatic ecosystems: freshwater, toxicants at 95% protection (ANZG)')
+    assert long.startswith('CCME Water Quality Index\n(against ANZG aquatic ecosystems')
+
+
+def test_ph_axes_fit_the_data(v):
+    # pH axes are padded around the data at both ends, not started at 0
+    panel = [p for p in plots.GALLERY['Saturation indices against pH'] if plots.available(v, p)][0]
+    ax = plots.gallery_page(v, [panel]).axes[0]
+    lo, hi = ax.get_xlim()
+    assert v['pH'].min() - 1 < lo < v['pH'].min() and v['pH'].max() < hi < v['pH'].max() + 1
+    # other non-negative axes still start at 0
+    ax = plots.gallery_page(v, [plots.GALLERY['Major ions against Cl'][0]]).axes[0]
+    assert ax.get_xlim()[0] == 0 and ax.get_ylim()[0] == 0
+    # bar charts against a guideline still start at 0
+    g = [r for r in guidelines.SETS['Drinking water: aesthetic (ADWG)'] if r['var'] == 'pH'][0]
+    assert plots.guideline_bars(v, 'pH', guidelines.chart_lines(v, g)).axes[0].get_ylim()[0] == 0
+
+
+def test_custom_plot_reference_lines(v):
+    # seawater ratio in each unit, and only for two ions in the same unit
+    assert plots.seawater_slope('Cl (mg/L)', 'Ca (mg/L)') == pytest.approx(411 / 19350)
+    mmol = plots.seawater_slope('Cl (mmol/L)', 'Ca (mmol/L)')
+    assert mmol == pytest.approx((411 / chem.ANALYTES['Ca'][0]) / (19350 / chem.ANALYTES['Cl'][0]))
+    assert plots.seawater_slope('Cl (meq/L)', 'Ca (meq/L)') == pytest.approx(2 * mmol)
+    assert plots.seawater_slope('Cl (mmol/L)', 'Ca (mg/L)') is None
+    assert plots.seawater_slope('pH', 'Ca (mmol/L)') is None
+    fig = plots.custom(v, 'Cl (mmol/L)', 'Ca (mmol/L)', ratio_lines=['1:1 (y = x)', '2:1 (y = 2x)', '1:2 (y = x/2)',
+                       plots.SEAWATER_LINE, plots.CUSTOM_RATIO], custom_ratio=3)
+    labels = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    for lab in ('1:1', '2:1', '1:2', '3:1'):
+        assert lab in labels
+    assert any(lab.startswith('Seawater ratio') for lab in labels)
+    ax = fig.axes[0]
+    slopes = sorted(round(float(np.diff(l.get_ydata())[0] / np.diff(l.get_xdata())[0]), 4)
+                    for l in ax.get_lines() if len(l.get_xdata()) == 50)
+    assert slopes == sorted(round(s, 4) for s in (1, 2, 0.5, 3, mmol))
+    # the older one_to_one switch still gives the 1:1 line, once
+    labels = [t.get_text() for t in plots.custom(v, 'Cl (mmol/L)', 'Na (mmol/L)', one_to_one=True,
+                                                 ratio_lines=['1:1 (y = x)']).axes[0].get_legend().get_texts()]
+    assert labels.count('1:1') == 1

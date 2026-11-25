@@ -191,7 +191,7 @@ def exchange_plot(v, res):
 
 
 # %% PCA
-def pca_biplot(v, res, a='PC1', b='PC2', means=False):
+def pca_biplot(v, res, a='PC1', b='PC2', means=False, letters=None, letters_pos=plots.PANEL_LABEL_POS[0]):
     # sample scores by group, variable loadings as arrows, and the share of variance per component
     sc, ld, ex = res['scores'], res['loadings'], res['explained']
     vv = v.loc[sc.index]
@@ -236,6 +236,13 @@ def pca_biplot(v, res, a='PC1', b='PC2', means=False):
         ax2.set_ylabel('Variance (%)', fontsize=7)
         ax2.set_ylim(0, 100)
         ax2.tick_params(labelsize=6)
+        # panel letters: (a) the biplot, (b) the variance panel. Headroom is added by hand to the variance
+        # panel only (the cumulative curve reaches 100 %); the biplot keeps its square, symmetric axes and
+        # the letter sits on its light backing
+        if letters and 'inside' in letters_pos:
+            ax2.set_ylim(0, 100 / 0.84)
+            ax2.set_yticks([0, 25, 50, 75, 100])
+        plots.panel_letters([ax, ax2], letters, letters_pos, headroom=False)
         handles = plots._legend_handles(styles, False, means) + plots.ring_handles(vv)
         if flagged:
             handles.append(Line2D([], [], ls='', marker='x', color='black', ms=6, label='Multivariate outlier'))
@@ -372,6 +379,7 @@ def box_page(v, cols, kw, log=False, letters=None, letters_pos=plots.PANEL_LABEL
 
 def corr_heatmap(r, n, min_n=4):
     # Spearman rank correlations, with the coefficient in each cell; cells with too few samples are blank
+    # blue = positive, red = negative
     k = len(r)
     if k < 2:
         return None
@@ -381,7 +389,7 @@ def corr_heatmap(r, n, min_n=4):
     with matplotlib.rc_context(STYLE):
         fig = Figure(figsize=(17 * CM, size * CM), dpi=150)
         ax = fig.add_axes([0.18, 0.2, 0.6, 0.75])
-        cmap = matplotlib.colormaps['RdBu_r'].with_extremes(bad='0.92')
+        cmap = matplotlib.colormaps['RdBu'].with_extremes(bad='0.92')
         im = ax.imshow(np.ma.masked_invalid(vals), cmap=cmap, vmin=-1, vmax=1)
         names = [pretty(c) for c in r.columns]
         ax.set_xticks(range(k))
